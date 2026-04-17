@@ -1,7 +1,6 @@
-import type { MetadataRoute } from 'next';
 import { sortedTutorials } from '@/data/tutorials';
 
-export default function sitemap(): MetadataRoute.Sitemap {
+export default function sitemap() {
   const baseUrl = 'https://tutorial.sedifex.com';
 
   return [
@@ -12,7 +11,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
     },
     ...sortedTutorials.map((tutorial) => ({
       url: `${baseUrl}/tutorials/${tutorial.slug}`,
-      changeFrequency: 'weekly' as const,
+      changeFrequency: 'weekly',
       priority: 0.8
     }))
   ];

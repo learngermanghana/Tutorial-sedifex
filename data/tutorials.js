@@ -1,23 +1,4 @@
-export type UserRole = 'Owner/Admin' | 'Staff' | 'Operations';
-
-export type Tutorial = {
-  slug: string;
-  title: string;
-  description: string;
-  intro: string;
-  keyActions: string[];
-  steps: string[];
-  notes: string[];
-  screenshot?: {
-    src: string;
-    alt: string;
-  };
-  roles: UserRole[];
-  order: number;
-  parentSlug?: string;
-};
-
-export const tutorials: Tutorial[] = [
+export const tutorials = [
   {
     slug: 'dashboard',
     title: 'Dashboard',
@@ -304,4 +285,4 @@ export const tutorials: Tutorial[] = [
 
 export const sortedTutorials = tutorials.toSorted((a, b) => a.order - b.order);
 
-export const getTutorialBySlug = (slug: string) => tutorials.find((tutorial) => tutorial.slug === slug);
+export const getTutorialBySlug = (slug) => tutorials.find((tutorial) => tutorial.slug === slug);
