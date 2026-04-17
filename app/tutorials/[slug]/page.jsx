@@ -4,6 +4,7 @@ import { TutorialPage } from '@/components/tutorial-page';
 import { getTutorialBySlug, sortedTutorials } from '@/data/tutorials';
 
 export const dynamicParams = false;
+export const dynamic = 'force-static';
 
 export function generateStaticParams() {
   return sortedTutorials.map((tutorial) => ({ slug: tutorial.slug }));
