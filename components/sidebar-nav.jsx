@@ -1,11 +1,7 @@
 import Link from 'next/link';
 import { sortedTutorials } from '@/data/tutorials';
 
-type SidebarNavProps = {
-  currentSlug?: string;
-};
-
-export function SidebarNav({ currentSlug }: SidebarNavProps) {
+export function SidebarNav({ currentSlug }) {
   return (
     <aside className="sticky top-4 h-fit rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
       <p className="mb-3 text-sm font-semibold text-slate-900">Tutorial Sections</p>

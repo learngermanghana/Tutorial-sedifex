@@ -1,13 +1,7 @@
-import { ReactNode } from 'react';
 import { SiteHeader } from '@/components/site-header';
 import { SidebarNav } from '@/components/sidebar-nav';
 
-type PageShellProps = {
-  children: ReactNode;
-  currentSlug?: string;
-};
-
-export function PageShell({ children, currentSlug }: PageShellProps) {
+export function PageShell({ children, currentSlug }) {
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900">
       <SiteHeader />

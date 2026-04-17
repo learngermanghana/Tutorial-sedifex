@@ -1,12 +1,7 @@
 import Image from 'next/image';
 import Link from 'next/link';
-import { Tutorial } from '@/data/tutorials';
 
-type TutorialPageProps = {
-  tutorial: Tutorial;
-};
-
-export function TutorialPage({ tutorial }: TutorialPageProps) {
+export function TutorialPage({ tutorial }) {
   return (
     <article className="space-y-6">
       <header className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
