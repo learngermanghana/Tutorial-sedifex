@@ -3,7 +3,9 @@ import { PageShell } from '@/components/page-shell';
 import { TutorialPage } from '@/components/tutorial-page';
 import { getTutorialBySlug, sortedTutorials } from '@/data/tutorials';
 
-export async function generateStaticParams() {
+export const dynamicParams = false;
+
+export function generateStaticParams() {
   return sortedTutorials.map((tutorial) => ({ slug: tutorial.slug }));
 }
 
