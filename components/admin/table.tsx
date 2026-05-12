@@ -1,0 +1,2 @@
+import { ReactNode } from 'react';
+export function DataTable({columns,rows}:{columns:string[];rows:ReactNode[][]}){return <table className='w-full bg-white border rounded-xl overflow-hidden'><thead><tr>{columns.map(c=><th key={c} className='text-left p-3 border-b'>{c}</th>)}</tr></thead><tbody>{rows.map((r,i)=><tr key={i} className='border-b'>{r.map((c,j)=><td key={j} className='p-3'>{c}</td>)}</tr>)}</tbody></table>}
