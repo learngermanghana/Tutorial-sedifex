@@ -1,46 +1,36 @@
-"use client";
+'use client';
 
-import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { LayoutDashboard, Store, Users, Plug, ShieldCheck } from "lucide-react";
+import Link from 'next/link';
+import { usePathname } from 'next/navigation';
+import { LayoutDashboard, Store, Users, Plug, ShieldCheck, Building2, ScrollText, Webhook } from 'lucide-react';
+import { useAdminContext } from './admin-context';
 
 const items = [
-  { href: "/admin", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/admin/stores", label: "Stores", icon: Store },
-  { href: "/admin/users", label: "Users & Roles", icon: Users },
-  { href: "/admin/integrations", label: "Integrations", icon: Plug },
+  { href: '/admin', label: 'Dashboard', icon: LayoutDashboard, scopes: ['platform', 'store'] },
+  { href: '/admin/tenants', label: 'Tenants & Stores', icon: Building2, scopes: ['platform'] },
+  { href: '/admin/stores', label: 'Stores', icon: Store, scopes: ['platform', 'store'] },
+  { href: '/admin/users', label: 'Users & Roles', icon: Users, scopes: ['platform'] },
+  { href: '/admin/audit-logs', label: 'Audit Logs', icon: ScrollText, scopes: ['platform', 'store'] },
+  { href: '/admin/integrations/clients', label: 'Integration Clients', icon: Plug, scopes: ['platform', 'store'] },
+  { href: '/admin/integrations/webhooks', label: 'Webhook Endpoints', icon: Webhook, scopes: ['platform', 'store'] },
+  { href: '/admin/integrations/deliveries', label: 'Delivery Logs', icon: ShieldCheck, scopes: ['platform', 'store'] },
 ];
 
 export default function AdminSidebar() {
   const pathname = usePathname();
+  const { scope } = useAdminContext();
 
   return (
-    <aside className="min-h-screen w-64 border-r border-gray-200 bg-white">
+    <aside className="min-h-screen w-72 border-r border-gray-200 bg-white">
       <div className="border-b border-gray-200 p-6">
-        <div className="flex items-center gap-2">
-          <ShieldCheck className="h-6 w-6" />
-          <div>
-            <p className="text-lg font-bold">Sedifex Admin</p>
-            <p className="text-sm text-gray-500">Control Panel</p>
-          </div>
-        </div>
+        <p className="text-lg font-bold">Sedifex Admin</p>
       </div>
-
       <nav className="space-y-2 p-4">
-        {items.map((item) => {
+        {items.filter((i) => i.scopes.includes(scope)).map((item) => {
           const Icon = item.icon;
           const active = pathname === item.href;
-
           return (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={`flex items-center gap-3 rounded-xl px-4 py-3 text-sm font-medium transition ${
-                active
-                  ? "bg-black text-white"
-                  : "text-gray-700 hover:bg-gray-100"
-              }`}
-            >
+            <Link key={item.href} href={item.href} className={`flex items-center gap-3 rounded-xl px-4 py-3 text-sm font-medium ${active ? 'bg-black text-white' : 'text-gray-700 hover:bg-gray-100'}`}>
               <Icon className="h-4 w-4" />
               {item.label}
             </Link>

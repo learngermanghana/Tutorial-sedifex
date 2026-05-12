@@ -1,1 +1,1 @@
-export function getAuth(){return {};}
+export function getAuth(app?: unknown){return {app};}

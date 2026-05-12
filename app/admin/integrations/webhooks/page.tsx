@@ -1,0 +1,1 @@
+export default function WebhookEndpointsPage(){return <div><h2 className="text-2xl font-bold">Webhook Endpoints</h2><p className="text-gray-600">Manage event subscriptions and endpoint health.</p></div>}
