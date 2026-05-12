@@ -1,0 +1,1 @@
+export function FilterBar(){return <div className='mb-4 flex gap-2'><input className='border rounded px-3 py-2 w-64' placeholder='Search'/><button className='bg-slate-900 text-white rounded px-3'>Filter</button></div>}
