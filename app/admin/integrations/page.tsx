@@ -1,31 +1,13 @@
-const integrations = [
-  { name: "Website API Client", type: "client_id / secret", status: "Active" },
-  { name: "Webhook: Orders", type: "webhook", status: "Healthy" },
-  { name: "Webhook: Catalog Sync", type: "webhook", status: "Retrying" },
+import Link from 'next/link';
+
+const pages = [
+  { href: '/admin/integrations/clients', title: 'API Clients', desc: 'Create/rotate/revoke API credentials and assign scopes.' },
+  { href: '/admin/integrations/webhooks', title: 'Webhook Endpoints', desc: 'Configure endpoints, secrets, events, and endpoint state.' },
+  { href: '/admin/integrations/deliveries', title: 'Delivery Logs', desc: 'Inspect delivery status, retries, and replay failed events.' },
+  { href: '/admin/integrations/clients', title: 'Origins & CORS', desc: 'Manage per-client allowed origin domains.' },
+  { href: '/admin/integrations/clients', title: 'SDK / Embed Snippet', desc: 'Generate a script snippet with storeId and permissions.' },
 ];
 
 export default function IntegrationsPage() {
-  return (
-    <div className="space-y-6">
-      <div>
-        <h2 className="text-2xl font-bold text-gray-900">Integrations</h2>
-        <p className="text-gray-600">
-          Manage API credentials, webhooks, and delivery activity.
-        </p>
-      </div>
-
-      <div className="grid gap-4 md:grid-cols-3">
-        {integrations.map((item) => (
-          <div
-            key={item.name}
-            className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm"
-          >
-            <p className="text-sm text-gray-500">{item.type}</p>
-            <h3 className="mt-2 text-lg font-semibold text-gray-900">{item.name}</h3>
-            <p className="mt-2 text-sm text-gray-600">{item.status}</p>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
+  return <div className="space-y-4"><h2 className="text-2xl font-bold">Integrations</h2><div className="grid md:grid-cols-2 gap-4">{pages.map(p => <Link className="rounded-xl border bg-white p-4" href={p.href} key={p.title}><h3 className="font-semibold">{p.title}</h3><p className="text-sm text-gray-600">{p.desc}</p></Link>)}</div></div>;
 }
