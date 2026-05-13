@@ -1,1 +1,14 @@
-export const z = { string: () => ({ min: () => ({ default: () => ({}) }) }), enum: <T extends readonly string[]>(v:T)=>({}), object: <T>(_:T)=>({ parse:(input:any)=>input }) } as any;
+const stringSchema = {
+  min: () => stringSchema,
+  default: () => stringSchema,
+};
+
+export const z = {
+  string: () => stringSchema,
+  enum: <T extends readonly string[]>(_values: T) => ({
+    parse: (input: unknown) => input,
+  }),
+  object: <T>(_shape: T) => ({
+    parse: (input: any) => input,
+  }),
+} as any;
