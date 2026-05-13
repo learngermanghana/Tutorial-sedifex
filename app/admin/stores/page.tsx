@@ -1,39 +1,12 @@
+import { Search, SlidersHorizontal } from 'lucide-react';
+import { SectionCard, StatusBadge } from '../../../components/admin/ui';
+
 const stores = [
-  { name: "Glittering Med Spa", plan: "Pro", status: "Active", location: "Accra" },
-  { name: "Kwaku Lotteryy", plan: "Business", status: "Pending", location: "Tema" },
-  { name: "Makeup N More School", plan: "Starter", status: "Active", location: "Tema" },
+  { name: 'Luma Beauty Collective', plan: 'Enterprise', status: 'Active', location: 'Austin, TX', orders: '12.4k' },
+  { name: 'Northline Wellness', plan: 'Growth', status: 'Provisioning', location: 'Denver, CO', orders: '3.8k' },
+  { name: 'Atelier Skin Lab', plan: 'Starter', status: 'At Risk', location: 'Seattle, WA', orders: '1.1k' },
 ];
 
 export default function StoresPage() {
-  return (
-    <div className="space-y-6">
-      <div>
-        <h2 className="text-2xl font-bold text-gray-900">Stores</h2>
-        <p className="text-gray-600">Manage store lifecycle, plan, and verification.</p>
-      </div>
-
-      <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
-        <table className="min-w-full text-sm">
-          <thead className="bg-gray-50 text-left text-gray-600">
-            <tr>
-              <th className="px-4 py-3">Store</th>
-              <th className="px-4 py-3">Plan</th>
-              <th className="px-4 py-3">Status</th>
-              <th className="px-4 py-3">Location</th>
-            </tr>
-          </thead>
-          <tbody>
-            {stores.map((store) => (
-              <tr key={store.name} className="border-t border-gray-100">
-                <td className="px-4 py-3 font-medium text-gray-900">{store.name}</td>
-                <td className="px-4 py-3">{store.plan}</td>
-                <td className="px-4 py-3">{store.status}</td>
-                <td className="px-4 py-3">{store.location}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
+  return <div className="grid gap-6 xl:grid-cols-4"><div className="space-y-6 xl:col-span-3"><SectionCard title="Store Directory" action={<button className="rounded-lg bg-slate-900 px-3 py-2 text-xs font-medium text-white">Add Store</button>}><div className="mb-4 flex flex-col gap-3 sm:flex-row"><div className="flex flex-1 items-center gap-2 rounded-xl border border-slate-200 px-3 py-2"><Search className="h-4 w-4 text-slate-400" /><input className="w-full text-sm outline-none" placeholder="Search by store name, ID, or owner" /></div><button className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-sm"><SlidersHorizontal className="h-4 w-4" /> Filters</button></div><div className="overflow-hidden rounded-xl border border-slate-200"><table className="min-w-full text-sm"><thead className="bg-slate-50 text-left text-slate-600"><tr><th className="px-4 py-3">Store</th><th className="px-4 py-3">Plan</th><th className="px-4 py-3">Status</th><th className="px-4 py-3">Location</th><th className="px-4 py-3">Orders</th></tr></thead><tbody>{stores.map((store) => <tr key={store.name} className="border-t border-slate-100 hover:bg-slate-50"><td className="px-4 py-3 font-medium text-slate-900">{store.name}</td><td className="px-4 py-3"><StatusBadge tone="blue">{store.plan}</StatusBadge></td><td className="px-4 py-3"><StatusBadge tone={store.status === 'Active' ? 'green' : store.status === 'Provisioning' ? 'yellow' : 'red'}>{store.status}</StatusBadge></td><td className="px-4 py-3 text-slate-600">{store.location}</td><td className="px-4 py-3 text-slate-600">{store.orders}</td></tr>)}</tbody></table></div></SectionCard></div><SectionCard title="Store Details"><div className="space-y-3 text-sm text-slate-600"><p className="font-medium text-slate-900">Select a store row</p><p>Detailed tenant profile, billing status, integrations, and verification actions appear in this panel.</p><div className="h-28 animate-pulse rounded-xl bg-slate-100" /></div></SectionCard></div>;
 }
