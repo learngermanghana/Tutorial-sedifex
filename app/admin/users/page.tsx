@@ -1,37 +1,11 @@
+import { SectionCard, StatusBadge } from '../../../components/admin/ui';
+
 const users = [
-  { name: "Felix Asadu", role: "super_admin", email: "moxflex@gmail.com" },
-  { name: "Ama Mensah", role: "ops_admin", email: "ama@example.com" },
-  { name: "Kojo Lamptey", role: "store_admin", email: "kojo@example.com" },
+  { name: 'Nia Mensah', role: 'Super Admin', email: 'nia@sedi.io', status: 'Active' },
+  { name: 'Darius Cole', role: 'Ops Admin', email: 'darius@sedi.io', status: 'Pending Invite' },
+  { name: 'Priya Desai', role: 'Security Admin', email: 'priya@sedi.io', status: 'Active' },
 ];
 
 export default function UsersPage() {
-  return (
-    <div className="space-y-6">
-      <div>
-        <h2 className="text-2xl font-bold text-gray-900">Users & Roles</h2>
-        <p className="text-gray-600">Manage admin users and permission levels.</p>
-      </div>
-
-      <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
-        <table className="min-w-full text-sm">
-          <thead className="bg-gray-50 text-left text-gray-600">
-            <tr>
-              <th className="px-4 py-3">Name</th>
-              <th className="px-4 py-3">Email</th>
-              <th className="px-4 py-3">Role</th>
-            </tr>
-          </thead>
-          <tbody>
-            {users.map((user) => (
-              <tr key={user.email} className="border-t border-gray-100">
-                <td className="px-4 py-3 font-medium text-gray-900">{user.name}</td>
-                <td className="px-4 py-3">{user.email}</td>
-                <td className="px-4 py-3">{user.role}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
+  return <SectionCard title="Admin Users" action={<button className="rounded-lg bg-indigo-600 px-3 py-2 text-xs font-medium text-white">Invite Admin</button>}><div className="overflow-hidden rounded-xl border border-slate-200"><table className="min-w-full text-sm"><thead className="bg-slate-50 text-left text-slate-600"><tr><th className="px-4 py-3">Name</th><th className="px-4 py-3">Email</th><th className="px-4 py-3">Role</th><th className="px-4 py-3">Status</th></tr></thead><tbody>{users.map((user) => <tr key={user.email} className="border-t border-slate-100 hover:bg-slate-50"><td className="px-4 py-3"><p className="font-medium text-slate-900">{user.name}</p></td><td className="px-4 py-3 text-slate-600">{user.email}</td><td className="px-4 py-3"><StatusBadge tone="slate">{user.role}</StatusBadge></td><td className="px-4 py-3"><StatusBadge tone={user.status === 'Active' ? 'green' : 'yellow'}>{user.status}</StatusBadge></td></tr>)}</tbody></table></div></SectionCard>;
 }
