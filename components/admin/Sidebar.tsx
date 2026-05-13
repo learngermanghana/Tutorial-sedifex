@@ -11,9 +11,9 @@ const groups: { label: string; items: Item[] }[] = [
   { label: 'Commerce', items: [{ href: '/admin/stores', label: 'Stores', icon: Package }] },
   { label: 'Customers', items: [{ href: '/admin/users', label: 'Admins & Roles', icon: Users }] },
   { label: 'Engagement', items: [{ href: '/admin', label: 'Campaign Health', icon: ChartNoAxesCombined }] },
-  { label: 'Integrations', items: [{ href: '/admin/integrations', label: 'API & Webhooks', icon: Plug }] },
-  { label: 'Operations', items: [{ href: '/admin', label: 'Workflows', icon: Boxes }] },
-  { label: 'Settings', items: [{ href: '/admin', label: 'Preferences', icon: Cog }] },
+  { label: 'Integrations', items: [{ href: '/admin/integrations', label: 'Overview', icon: Plug }, { href: '/admin/webhooks', label: 'Webhooks', icon: Plug }, { href: '/admin/deliveries', label: 'Deliveries', icon: Boxes }] },
+  { label: 'Operations', items: [{ href: '/admin/audit-logs', label: 'Audit Logs', icon: ChartNoAxesCombined }] },
+  { label: 'Settings', items: [{ href: '/admin/settings', label: 'Preferences', icon: Cog }] },
 ];
 
 export default function Sidebar({ mobileOpen, onMobileClose }: { mobileOpen: boolean; onMobileClose: () => void }) {

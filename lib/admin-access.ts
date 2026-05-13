@@ -18,6 +18,9 @@ export const ROUTE_ACCESS: Array<{ pattern: RegExp; scopes: AdminScope[]; roles:
   { pattern: /^\/admin\/audit-logs/, scopes: ['platform', 'store'], roles: ['super_admin', 'ops_admin', 'analyst', 'moderator'] },
   { pattern: /^\/admin\/integrations\/clients/, scopes: ['platform', 'store'], roles: ['super_admin', 'ops_admin', 'store_admin'] },
   { pattern: /^\/admin\/integrations\/webhooks/, scopes: ['platform', 'store'], roles: ['super_admin', 'ops_admin', 'store_admin', 'support'] },
+  { pattern: /^\/admin\/webhooks/, scopes: ['platform', 'store'], roles: ['super_admin', 'ops_admin', 'store_admin', 'support'] },
+  { pattern: /^\/admin\/deliveries/, scopes: ['platform', 'store'], roles: ['super_admin', 'ops_admin', 'store_admin', 'support', 'analyst'] },
+  { pattern: /^\/admin\/settings/, scopes: ['platform', 'store'], roles: ['super_admin', 'ops_admin', 'store_admin'] },
   { pattern: /^\/admin\/integrations\/deliveries/, scopes: ['platform', 'store'], roles: ['super_admin', 'ops_admin', 'store_admin', 'support', 'analyst'] },
 ];
 
