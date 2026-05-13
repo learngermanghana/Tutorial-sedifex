@@ -14,6 +14,10 @@ const titleMap: Record<string, { title: string; description: string }> = {
   '/admin/stores': { title: 'Stores', description: 'Manage tenant stores, plans, status, and storefront operations.' },
   '/admin/users': { title: 'Users', description: 'Control admin access, roles, and account security posture.' },
   '/admin/integrations': { title: 'Integrations', description: 'Manage API clients, webhooks, credentials, and delivery reliability.' },
+  '/admin/audit-logs': { title: 'Audit Logs', description: 'Trace actor actions and sensitive system changes.' },
+  '/admin/webhooks': { title: 'Webhooks', description: 'Manage endpoints, subscriptions, and webhook health.' },
+  '/admin/deliveries': { title: 'Deliveries', description: 'Inspect delivery outcomes, retries, and incident patterns.' },
+  '/admin/settings': { title: 'Settings', description: 'Configure session, security, and platform-level preferences.' },
 };
 
 export default function AdminShell({ children }: { children: ReactNode }) {

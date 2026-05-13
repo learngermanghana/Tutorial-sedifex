@@ -1,11 +1,9 @@
+'use client';
+import { useState } from 'react';
+import { adminUsers, roleLabels } from '../../../lib/admin-mock-data';
 import { SectionCard, StatusBadge } from '../../../components/admin/ui';
 
-const users = [
-  { name: 'Nia Mensah', role: 'Super Admin', email: 'nia@sedi.io', status: 'Active' },
-  { name: 'Darius Cole', role: 'Ops Admin', email: 'darius@sedi.io', status: 'Pending Invite' },
-  { name: 'Priya Desai', role: 'Security Admin', email: 'priya@sedi.io', status: 'Active' },
-];
-
 export default function UsersPage() {
-  return <SectionCard title="Admin Users" action={<button className="rounded-lg bg-indigo-600 px-3 py-2 text-xs font-medium text-white">Invite Admin</button>}><div className="overflow-hidden rounded-xl border border-slate-200"><table className="min-w-full text-sm"><thead className="bg-slate-50 text-left text-slate-600"><tr><th className="px-4 py-3">Name</th><th className="px-4 py-3">Email</th><th className="px-4 py-3">Role</th><th className="px-4 py-3">Status</th></tr></thead><tbody>{users.map((user) => <tr key={user.email} className="border-t border-slate-100 hover:bg-slate-50"><td className="px-4 py-3"><p className="font-medium text-slate-900">{user.name}</p></td><td className="px-4 py-3 text-slate-600">{user.email}</td><td className="px-4 py-3"><StatusBadge tone="slate">{user.role}</StatusBadge></td><td className="px-4 py-3"><StatusBadge tone={user.status === 'Active' ? 'green' : 'yellow'}>{user.status}</StatusBadge></td></tr>)}</tbody></table></div></SectionCard>;
+  const [open, setOpen] = useState(false);
+  return <SectionCard title="Admin Users" action={<button onClick={()=>setOpen(true)} className="rounded-lg bg-indigo-600 px-3 py-2 text-xs font-medium text-white">Invite Admin</button>}><div className="overflow-hidden rounded-xl border border-slate-200"><table className="min-w-full text-sm"><thead className="bg-slate-50"><tr><th className="px-4 py-3 text-left">Name</th><th className="px-4 py-3 text-left">Email</th><th className="px-4 py-3 text-left">Role</th><th className="px-4 py-3 text-left">Status</th></tr></thead><tbody>{adminUsers.map((u)=><tr key={u.id} className="border-t border-slate-100"><td className="px-4 py-3 font-medium">{u.name}</td><td className="px-4 py-3 text-slate-600">{u.email}</td><td className="px-4 py-3"><StatusBadge tone="slate">{roleLabels[u.role]}</StatusBadge></td><td className="px-4 py-3"><StatusBadge tone={u.status==='active'?'green':u.status==='pending_invite'?'yellow':'red'}>{u.status.replace('_',' ')}</StatusBadge></td></tr>)}</tbody></table></div>{open && <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40"><div className="w-full max-w-md rounded-2xl bg-white p-5"><h4 className="font-semibold">Invite admin</h4><p className="mt-1 text-sm text-slate-600">Mock modal with role assignment for Sedifex admins.</p><div className="mt-4 flex justify-end gap-2"><button onClick={()=>setOpen(false)} className="rounded-lg border px-3 py-2 text-sm">Cancel</button><button onClick={()=>setOpen(false)} className="rounded-lg bg-indigo-600 px-3 py-2 text-sm text-white">Send Invite</button></div></div></div>}</SectionCard>;
 }

@@ -1,23 +1,7 @@
-import { KeyRound, Send, Webhook } from 'lucide-react';
+import Link from 'next/link';
 import { SectionCard, StatusBadge } from '../../../components/admin/ui';
+import { apiClients, deliveries, webhookEndpoints } from '../../../lib/admin-mock-data';
 
 export default function IntegrationsPage() {
-  return (
-    <div className="grid gap-6 lg:grid-cols-3">
-      <SectionCard title="API Clients">
-        <div className="space-y-3 text-sm"><p className="flex items-center gap-2 font-medium text-slate-900"><KeyRound className="h-4 w-4" /> Platform API Credentials</p><p className="text-slate-600">2 active production clients with scoped tokens.</p><StatusBadge tone="green">Active</StatusBadge></div>
-      </SectionCard>
-      <SectionCard title="Webhook Health">
-        <div className="space-y-3 text-sm"><p className="flex items-center gap-2 font-medium text-slate-900"><Webhook className="h-4 w-4" /> Endpoint Reliability</p><p className="text-slate-600">41 endpoints monitored across all tenants.</p><StatusBadge tone="yellow">Retrying</StatusBadge></div>
-      </SectionCard>
-      <SectionCard title="Recent Deliveries">
-        <div className="space-y-3 text-sm"><p className="flex items-center gap-2 font-medium text-slate-900"><Send className="h-4 w-4" /> Event Delivery Logs</p><p className="text-slate-600">Last 30 minutes: 1,129 deliveries processed.</p><StatusBadge tone="red">3 Failed</StatusBadge></div>
-      </SectionCard>
-
-      <div className="space-y-6 lg:col-span-3">
-        <SectionCard title="Credentials & Secrets"><div className="grid gap-4 md:grid-cols-2"><div className="rounded-xl border border-slate-200 p-4"><p className="text-sm font-medium">Client Token Rotation</p><p className="mt-1 text-sm text-slate-600">Rotate API secrets every 90 days.</p></div><div className="rounded-xl border border-slate-200 p-4"><p className="text-sm font-medium">Webhook Secret Policy</p><p className="mt-1 text-sm text-slate-600">Automatic reminder for stale endpoint secrets.</p></div></div></SectionCard>
-        <SectionCard title="Recent Webhook Deliveries"><div className="h-36 animate-pulse rounded-xl bg-slate-100" /></SectionCard>
-      </div>
-    </div>
-  );
+  return <div className="grid gap-6 lg:grid-cols-3"><SectionCard title="API clients"><p className="text-3xl font-semibold">{apiClients.length}</p><p className="text-sm text-slate-600">Active production clients</p><Link className="mt-3 inline-block text-sm text-indigo-600" href="/admin/integrations/clients">Manage clients</Link></SectionCard><SectionCard title="Webhook endpoints"><p className="text-3xl font-semibold">{webhookEndpoints.length}</p><StatusBadge tone="yellow">1 degraded endpoint</StatusBadge><Link className="mt-3 inline-block text-sm text-indigo-600" href="/admin/webhooks">Open endpoints</Link></SectionCard><SectionCard title="Delivery stream"><p className="text-3xl font-semibold">{deliveries.length}</p><StatusBadge tone="red">1 failed</StatusBadge><Link className="mt-3 inline-block text-sm text-indigo-600" href="/admin/deliveries">Inspect logs</Link></SectionCard></div>;
 }
