@@ -56,6 +56,8 @@ Copy `.env.example` to `.env.local` and set values as needed.
 - `SENTRY_DSN`: optional error monitoring DSN.
 - `OTEL_EXPORTER_OTLP_ENDPOINT`: optional OpenTelemetry endpoint.
 - `OTEL_SERVICE_NAME`: service name used in traces/metrics.
+- `ADMIN_EMAIL` / `ADMIN_PASSWORD`: platform admin login credentials for `/admin/login`.
+- `STAFF_EMAIL` / `STAFF_PASSWORD`: staff login credentials for `/admin/login` (store-scoped).
 
 ## Architecture Notes
 - Route groups separate platform pages (`app/(platform)`), store pages (`app/(store)`), and admin pages (`app/admin`).
