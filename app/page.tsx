@@ -1,41 +1,71 @@
 import Link from "next/link";
 
+const highlights = ["Stores", "Products", "Bookings", "Integrations"];
+
 export default function HomePage() {
   return (
-    <main className="flex min-h-screen items-center justify-center bg-slate-950 px-4 py-8">
-      <section className="w-full max-w-md overflow-hidden rounded-3xl border border-white/10 bg-slate-900 shadow-2xl">
-        <div className="relative h-56 sm:h-64">
-          <img
-            src="https://images.unsplash.com/photo-1552664730-d307ca884978?auto=format&fit=crop&w=1000&q=80"
-            alt="Team at Sedifex dashboard"
-            className="absolute inset-0 h-full w-full object-cover"
-          />
+    <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-slate-950 px-4 py-10 text-white">
+      <div className="absolute -left-24 top-16 h-64 w-64 rounded-full bg-indigo-500/20 blur-3xl" />
+      <div className="absolute -right-24 bottom-16 h-64 w-64 rounded-full bg-cyan-400/10 blur-3xl" />
 
-          <div className="absolute inset-0 bg-gradient-to-t from-slate-950/85 via-slate-950/20 to-transparent" />
-
-          <div className="absolute left-4 top-4 rounded-full bg-white/90 px-4 py-2 text-sm font-bold text-slate-950 shadow">
-            Sedifex
+      <section className="relative w-full max-w-lg rounded-3xl border border-white/10 bg-white/[0.04] p-6 shadow-2xl backdrop-blur sm:p-8">
+        <div className="mb-8 flex items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-indigo-500 text-lg font-black shadow-lg shadow-indigo-500/20">
+              S
+            </div>
+            <div>
+              <p className="text-sm font-semibold uppercase tracking-[0.22em] text-indigo-200">
+                Sedifex
+              </p>
+              <p className="text-xs text-slate-400">Admin Console</p>
+            </div>
           </div>
+          <span className="rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3 py-1 text-xs font-medium text-emerald-200">
+            Secure access
+          </span>
         </div>
 
-        <div className="relative z-10 -mt-8 px-5 pb-5">
-          <div className="rounded-2xl border border-white/10 bg-slate-950/95 p-5 shadow-xl">
-            <h1 className="text-center text-2xl font-bold text-white">
-              Manage your Sedifex store
-            </h1>
+        <div className="space-y-4">
+          <h1 className="text-4xl font-bold tracking-tight sm:text-5xl">
+            Manage Sedifex faster.
+          </h1>
+          <p className="max-w-md text-base leading-7 text-slate-300">
+            Sign in to manage stores, product feeds, bookings, checkout setup,
+            and integrations from one clean dashboard.
+          </p>
+        </div>
 
-            <p className="mt-2 text-center text-sm text-slate-400">
-              Sign in to manage products, orders, bookings, and integrations.
-            </p>
-
-            <Link
-              href="/admin/login"
-              className="mt-6 flex w-full items-center justify-center rounded-xl bg-indigo-500 px-8 py-3 text-base font-semibold text-white transition hover:bg-indigo-400"
+        <div className="mt-7 flex flex-wrap gap-2">
+          {highlights.map((item) => (
+            <span
+              key={item}
+              className="rounded-full border border-white/10 bg-white/[0.06] px-3 py-1.5 text-sm text-slate-200"
             >
-              Log in
-            </Link>
-          </div>
+              {item}
+            </span>
+          ))}
         </div>
+
+        <div className="mt-8 grid gap-3 sm:grid-cols-[1fr_auto]">
+          <Link
+            href="/admin/login"
+            className="inline-flex items-center justify-center rounded-2xl bg-indigo-500 px-6 py-3 text-sm font-bold text-white shadow-lg shadow-indigo-500/20 transition hover:bg-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-300"
+          >
+            Log in to admin
+          </Link>
+          <Link
+            href="/dashboard"
+            className="inline-flex items-center justify-center rounded-2xl border border-white/10 bg-white/[0.04] px-6 py-3 text-sm font-semibold text-slate-200 transition hover:bg-white/[0.08] focus:outline-none focus:ring-2 focus:ring-white/20"
+          >
+            View dashboard
+          </Link>
+        </div>
+
+        <p className="mt-6 text-xs leading-6 text-slate-500">
+          Lightweight landing page with no external hero image, so it loads
+          quicker and keeps the first screen focused on login.
+        </p>
       </section>
     </main>
   );
