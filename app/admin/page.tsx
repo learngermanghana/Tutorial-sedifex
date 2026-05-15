@@ -14,19 +14,77 @@ import {
   Zap,
 } from 'lucide-react';
 import { SectionCard, StatCard, StatusBadge } from '../../components/admin/ui';
+import { getFirebaseEnvStatus, listFirestoreDocuments } from '../../lib/firebase-admin';
 
-const metrics = [
-  { label: 'Store records', value: 'Ready', delta: 'Prepare storeSettings view' },
-  { label: 'Product feeds', value: 'Sync', delta: 'Prepare product visibility checks' },
-  { label: 'Bookings & orders', value: 'Live', delta: 'Prepare checkout activity view' },
-  { label: 'Integrations', value: 'Secure', delta: 'Clients, webhooks, and access' },
-];
+export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
+
+type DashboardRecord = Record<string, unknown> & {
+  id?: string;
+  path?: string;
+  updateTime?: string | null;
+  createTime?: string | null;
+};
+
+type DashboardData = {
+  connected: boolean;
+  error: string | null;
+  stores: DashboardRecord[];
+};
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+}
+
+function getNestedBoolean(record: DashboardRecord, path: string[]) {
+  let current: unknown = record;
+
+  for (const key of path) {
+    const obj = asRecord(current);
+    if (!obj || !(key in obj)) return false;
+    current = obj[key];
+  }
+
+  return current === true;
+}
+
+function getStoreName(record: DashboardRecord) {
+  const candidates = [record.storeName, record.name, record.businessName, record.displayName, record.id];
+  return String(candidates.find((item) => typeof item === 'string' && item.trim()) || 'Unnamed store');
+}
+
+async function getDashboardData(): Promise<DashboardData> {
+  const env = getFirebaseEnvStatus();
+
+  if (!env.ready) {
+    return {
+      connected: false,
+      error: 'Firebase environment variables are not ready in this deployment.',
+      stores: [],
+    };
+  }
+
+  try {
+    const result = await listFirestoreDocuments('storeSettings', 50);
+    return {
+      connected: true,
+      error: null,
+      stores: result.documents,
+    };
+  } catch (error) {
+    return {
+      connected: false,
+      error: error instanceof Error ? error.message : 'Unable to read storeSettings from Firestore.',
+      stores: [],
+    };
+  }
+}
 
 const quickActions = [
   {
-    title: 'Prepare data connection',
-    description: 'Set up the dashboard to show store, product, booking, and settings data.',
-    href: '/admin/settings',
+    title: 'View store settings API',
+    description: 'Open the live route that reads storeSettings from the Sedifex database.',
+    href: '/api/admin/firestore/store-settings',
     icon: Database,
   },
   {
@@ -51,14 +109,14 @@ const quickActions = [
 
 const setupSteps = [
   {
-    title: 'Add Firebase Admin environment variables',
-    description: 'Add project ID, service account email, and service account private key in Vercel.',
-    status: 'Required',
-    tone: 'blue' as const,
+    title: 'Read storeSettings from Firestore',
+    description: 'The dashboard now loads real storeSettings documents when Firebase envs are present.',
+    status: 'Added',
+    tone: 'green' as const,
   },
   {
-    title: 'Create protected admin API routes',
-    description: 'Add server routes for stores, products, bookings, and settings.',
+    title: 'Add store detail pages',
+    description: 'Create a store profile page that shows settings, products, bookings, checkout setup, and integrations.',
     status: 'Next',
     tone: 'yellow' as const,
   },
@@ -70,14 +128,52 @@ const setupSteps = [
   },
 ];
 
-const healthItems = [
-  { label: 'Admin login', value: 'Ready', icon: ShieldCheck, tone: 'green' as const },
-  { label: 'Database connection', value: 'Next', icon: Database, tone: 'yellow' as const },
-  { label: 'Webhook pages', value: 'Available', icon: Zap, tone: 'blue' as const },
-  { label: 'JSON file storage', value: 'Local only', icon: Server, tone: 'red' as const },
-];
+export default async function AdminDashboardPage() {
+  const dashboard = await getDashboardData();
+  const stores = dashboard.stores;
+  const googleShoppingConnected = stores.filter((store) => getNestedBoolean(store, ['googleShopping', 'connection', 'connected'])).length;
+  const autoSyncEnabled = stores.filter((store) => getNestedBoolean(store, ['googleShopping', 'catalogSync', 'autoSyncEnabled'])).length;
+  const recentlyUpdated = stores.filter((store) => {
+    if (!store.updateTime || typeof store.updateTime !== 'string') return false;
+    const updatedAt = new Date(store.updateTime).getTime();
+    return Number.isFinite(updatedAt) && Date.now() - updatedAt < 7 * 24 * 60 * 60 * 1000;
+  }).length;
 
-export default function AdminDashboardPage() {
+  const metrics = [
+    {
+      label: 'Store settings',
+      value: dashboard.connected ? String(stores.length) : 'Setup',
+      delta: dashboard.connected ? 'Loaded from Firestore' : 'Check Firebase envs',
+    },
+    {
+      label: 'Google Shopping',
+      value: dashboard.connected ? String(googleShoppingConnected) : '—',
+      delta: 'Connected stores found',
+    },
+    {
+      label: 'Auto sync enabled',
+      value: dashboard.connected ? String(autoSyncEnabled) : '—',
+      delta: 'Catalog sync setting active',
+    },
+    {
+      label: 'Recently updated',
+      value: dashboard.connected ? String(recentlyUpdated) : '—',
+      delta: 'Updated in the last 7 days',
+    },
+  ];
+
+  const healthItems = [
+    { label: 'Admin login', value: 'Ready', icon: ShieldCheck, tone: 'green' as const },
+    {
+      label: 'Database connection',
+      value: dashboard.connected ? 'Connected' : 'Needs setup',
+      icon: Database,
+      tone: dashboard.connected ? ('green' as const) : ('yellow' as const),
+    },
+    { label: 'Webhook pages', value: 'Available', icon: Zap, tone: 'blue' as const },
+    { label: 'JSON file storage', value: 'Local only', icon: Server, tone: 'red' as const },
+  ];
+
   return (
     <div className="space-y-6">
       <section className="rounded-3xl border border-slate-200 bg-slate-950 p-6 text-white shadow-sm sm:p-8">
@@ -91,7 +187,7 @@ export default function AdminDashboardPage() {
               Control stores, checkout, products, bookings, and integrations from one place.
             </h2>
             <p className="mt-4 max-w-2xl text-sm leading-7 text-slate-300">
-              This dashboard is now cleaner and ready for the next production step: connecting the interface to your Sedifex database.
+              The overview now reads live storeSettings data when the Firebase connection is available.
             </p>
           </div>
 
@@ -104,16 +200,24 @@ export default function AdminDashboardPage() {
               </div>
               <div className="flex items-center justify-between gap-3">
                 <span>Database data</span>
-                <StatusBadge tone="yellow">Next</StatusBadge>
+                <StatusBadge tone={dashboard.connected ? 'green' : 'yellow'}>
+                  {dashboard.connected ? 'Connected' : 'Setup needed'}
+                </StatusBadge>
               </div>
               <div className="flex items-center justify-between gap-3">
-                <span>Vercel env setup</span>
-                <StatusBadge tone="blue">Required</StatusBadge>
+                <span>Store settings loaded</span>
+                <StatusBadge tone="blue">{stores.length}</StatusBadge>
               </div>
             </div>
           </div>
         </div>
       </section>
+
+      {dashboard.error ? (
+        <section className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+          <strong className="font-semibold">Firestore notice:</strong> {dashboard.error}
+        </section>
+      ) : null}
 
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {metrics.map((metric) => (
@@ -152,6 +256,38 @@ export default function AdminDashboardPage() {
                 );
               })}
             </div>
+          </SectionCard>
+
+          <SectionCard title="Store settings preview">
+            {stores.length > 0 ? (
+              <div className="overflow-hidden rounded-2xl border border-slate-200">
+                <div className="grid grid-cols-[1.2fr_0.7fr_0.7fr] bg-slate-50 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  <span>Store</span>
+                  <span>Shopping</span>
+                  <span>Auto sync</span>
+                </div>
+                <div className="divide-y divide-slate-200">
+                  {stores.slice(0, 6).map((store) => (
+                    <div key={store.path || store.id} className="grid grid-cols-[1.2fr_0.7fr_0.7fr] items-center px-4 py-3 text-sm">
+                      <div className="min-w-0">
+                        <p className="truncate font-semibold text-slate-950">{getStoreName(store)}</p>
+                        <p className="truncate text-xs text-slate-500">{store.id}</p>
+                      </div>
+                      <StatusBadge tone={getNestedBoolean(store, ['googleShopping', 'connection', 'connected']) ? 'green' : 'slate'}>
+                        {getNestedBoolean(store, ['googleShopping', 'connection', 'connected']) ? 'On' : 'Off'}
+                      </StatusBadge>
+                      <StatusBadge tone={getNestedBoolean(store, ['googleShopping', 'catalogSync', 'autoSyncEnabled']) ? 'green' : 'slate'}>
+                        {getNestedBoolean(store, ['googleShopping', 'catalogSync', 'autoSyncEnabled']) ? 'On' : 'Off'}
+                      </StatusBadge>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-6 text-sm leading-6 text-slate-600">
+                No storeSettings documents are loaded yet. After the Firebase envs are added and the collection has documents, they will appear here.
+              </div>
+            )}
           </SectionCard>
 
           <SectionCard title="Production rollout plan">
