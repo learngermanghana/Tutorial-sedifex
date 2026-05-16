@@ -15,6 +15,7 @@ const titleMap: Record<string, { title: string; description: string }> = {
   '/admin/products': { title: 'Products', description: 'Inspect Sedifex product quality, public catalog readiness, and marketplace gaps.' },
   '/admin/marketplace': { title: 'Marketplace', description: 'Monitor SedifexMarket visibility, public products, and catalog quality.' },
   '/admin/checkout': { title: 'Checkout', description: 'Monitor market orders, checkout setup, payment status, and sync health.' },
+  '/admin/google-shopping': { title: 'Google Shopping', description: 'Monitor Merchant Center connections, catalog sync, tokens, and product validation.' },
   '/admin/users': { title: 'Users', description: 'Control admin access, roles, and account security posture.' },
   '/admin/integrations': { title: 'Integrations', description: 'Manage API clients, webhooks, credentials, and delivery reliability.' },
   '/admin/audit-logs': { title: 'Audit Logs', description: 'Trace actor actions and sensitive system changes.' },
