@@ -47,24 +47,18 @@ export default function HomePage() {
           ))}
         </div>
 
-        <div className="mt-8 grid gap-3 sm:grid-cols-[1fr_auto]">
+        <div className="mt-8">
           <Link
             href="/admin/login"
-            className="inline-flex items-center justify-center rounded-2xl bg-indigo-500 px-6 py-3 text-sm font-bold text-white shadow-lg shadow-indigo-500/20 transition hover:bg-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-300"
+            className="inline-flex w-full items-center justify-center rounded-2xl bg-indigo-500 px-6 py-3 text-sm font-bold text-white shadow-lg shadow-indigo-500/20 transition hover:bg-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-300"
           >
             Log in to admin
-          </Link>
-          <Link
-            href="/admin"
-            className="inline-flex items-center justify-center rounded-2xl border border-white/10 bg-white/[0.04] px-6 py-3 text-sm font-semibold text-slate-200 transition hover:bg-white/[0.08] focus:outline-none focus:ring-2 focus:ring-white/20"
-          >
-            View dashboard
           </Link>
         </div>
 
         <p className="mt-6 text-xs leading-6 text-slate-500">
           Lightweight landing page with no external hero image, so it loads
-          quicker and keeps the first screen focused on login.
+          quicker and keeps the first screen focused on secure login.
         </p>
       </section>
     </main>
