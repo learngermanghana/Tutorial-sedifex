@@ -12,6 +12,7 @@ import PageHeader from './PageHeader';
 const titleMap: Record<string, { title: string; description: string }> = {
   '/admin': { title: 'Overview', description: 'Monitor the health and performance of your Sedifex platform.' },
   '/admin/stores': { title: 'Stores', description: 'Manage tenant stores, plans, status, and storefront operations.' },
+  '/admin/products': { title: 'Products', description: 'Inspect Sedifex product quality, public catalog readiness, and marketplace gaps.' },
   '/admin/marketplace': { title: 'Marketplace', description: 'Monitor SedifexMarket visibility, public products, and catalog quality.' },
   '/admin/users': { title: 'Users', description: 'Control admin access, roles, and account security posture.' },
   '/admin/integrations': { title: 'Integrations', description: 'Manage API clients, webhooks, credentials, and delivery reliability.' },
