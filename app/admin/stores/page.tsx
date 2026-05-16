@@ -116,23 +116,29 @@ export default async function StoresPage() {
           action={<Link href="/api/admin/firestore/store-settings" className="inline-flex items-center gap-1 text-xs font-semibold text-indigo-600 hover:text-indigo-500">Raw data <ArrowUpRight className="h-3.5 w-3.5" /></Link>}
         >
           <div className="overflow-hidden rounded-2xl border border-slate-200">
-            <div className="grid grid-cols-[1.3fr_0.9fr_0.9fr_0.8fr] bg-slate-50 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500 max-lg:hidden">
-              <span>Store</span><span>Contact</span><span>Location</span><span>Integration</span>
+            <div className="grid grid-cols-[1.3fr_0.9fr_0.9fr_0.8fr_auto] bg-slate-50 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500 max-lg:hidden">
+              <span>Store</span><span>Contact</span><span>Location</span><span>Integration</span><span>Open</span>
             </div>
             <div className="divide-y divide-slate-200">
               {stores.length === 0 ? (
                 <div className="p-8 text-center text-sm text-slate-500">No storeSettings records found.</div>
-              ) : stores.map((store) => (
-                <div key={store.path || store.id} className="grid gap-3 px-4 py-4 text-sm transition hover:bg-slate-50 lg:grid-cols-[1.3fr_0.9fr_0.9fr_0.8fr] lg:items-center">
-                  <div className="flex min-w-0 items-center gap-3">
-                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl bg-indigo-50 text-indigo-600"><Store className="h-4 w-4" /></span>
-                    <div className="min-w-0"><p className="truncate font-semibold text-slate-950">{storeName(store)}</p><p className="truncate text-xs text-slate-500">{store.id || 'No ID'}</p></div>
-                  </div>
-                  <p className="truncate text-slate-600">{storeContact(store)}</p>
-                  <p className="truncate text-slate-600">{storeLocation(store)}</p>
-                  <StatusBadge tone={shoppingConnected(store) ? 'green' : 'slate'}>{shoppingConnected(store) ? 'Connected' : 'Not connected'}</StatusBadge>
-                </div>
-              ))}
+              ) : stores.map((store) => {
+                const storeId = store.id ? String(store.id) : '';
+                const detailHref = storeId ? `/admin/stores/${encodeURIComponent(storeId)}` : '/admin/stores';
+
+                return (
+                  <Link key={store.path || store.id} href={detailHref} className="grid gap-3 px-4 py-4 text-sm transition hover:bg-indigo-50/60 lg:grid-cols-[1.3fr_0.9fr_0.9fr_0.8fr_auto] lg:items-center">
+                    <div className="flex min-w-0 items-center gap-3">
+                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl bg-indigo-50 text-indigo-600"><Store className="h-4 w-4" /></span>
+                      <div className="min-w-0"><p className="truncate font-semibold text-slate-950">{storeName(store)}</p><p className="truncate text-xs text-slate-500">{store.id || 'No ID'}</p></div>
+                    </div>
+                    <p className="truncate text-slate-600">{storeContact(store)}</p>
+                    <p className="truncate text-slate-600">{storeLocation(store)}</p>
+                    <StatusBadge tone={shoppingConnected(store) ? 'green' : 'slate'}>{shoppingConnected(store) ? 'Connected' : 'Not connected'}</StatusBadge>
+                    <span className="inline-flex items-center gap-1 text-xs font-semibold text-indigo-600">Open <ArrowUpRight className="h-3.5 w-3.5" /></span>
+                  </Link>
+                );
+              })}
             </div>
           </div>
         </SectionCard>
@@ -148,6 +154,11 @@ export default async function StoresPage() {
                 </div>
                 <div className="rounded-2xl bg-slate-50 p-4"><p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Contact</p><p className="mt-1 font-semibold text-slate-950">{storeContact(firstStore)}</p></div>
                 <div className="rounded-2xl bg-slate-50 p-4"><p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Last updated</p><p className="mt-1 font-semibold text-slate-950">{formatDate(firstStore.updateTime)}</p></div>
+                {firstStore.id ? (
+                  <Link href={`/admin/stores/${encodeURIComponent(String(firstStore.id))}`} className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-indigo-500 px-4 py-3 text-sm font-bold text-white transition hover:bg-indigo-400">
+                    Open store details <ArrowUpRight className="h-4 w-4" />
+                  </Link>
+                ) : null}
               </div>
             ) : <p className="text-sm text-slate-500">No store selected yet.</p>}
           </SectionCard>
@@ -155,7 +166,7 @@ export default async function StoresPage() {
           <SectionCard title="Next upgrade">
             <div className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-600">
               <div className="flex items-center gap-2 font-semibold text-slate-950"><Database className="h-4 w-4 text-indigo-600" />Store detail page</div>
-              <p className="mt-2 leading-6">Next we should add a page for one store so you can inspect products, bookings, checkout setup, and integrations.</p>
+              <p className="mt-2 leading-6">Store rows now open the detail page. Next we can add products, bookings, and safe edit actions for each store.</p>
             </div>
           </SectionCard>
         </div>
