@@ -8,7 +8,7 @@ import { Boxes, ChartNoAxesCombined, ChevronRight, Cog, House, Package, Plug, Sh
 type Item = { href: string; label: string; icon: ComponentType<{ className?: string }> };
 const groups: { label: string; items: Item[] }[] = [
   { label: 'Overview', items: [{ href: '/admin', label: 'Command Center', icon: House }] },
-  { label: 'Commerce', items: [{ href: '/admin/stores', label: 'Stores', icon: Store }, { href: '/admin/marketplace', label: 'Marketplace', icon: ShoppingBag }] },
+  { label: 'Commerce', items: [{ href: '/admin/stores', label: 'Stores', icon: Store }, { href: '/admin/products', label: 'Products', icon: Package }, { href: '/admin/marketplace', label: 'Marketplace', icon: ShoppingBag }] },
   { label: 'Customers', items: [{ href: '/admin/users', label: 'Admins & Roles', icon: Users }] },
   { label: 'Engagement', items: [{ href: '/admin', label: 'Campaign Health', icon: ChartNoAxesCombined }] },
   { label: 'Integrations', items: [{ href: '/admin/integrations', label: 'Overview', icon: Plug }, { href: '/admin/webhooks', label: 'Webhooks', icon: Plug }, { href: '/admin/deliveries', label: 'Deliveries', icon: Boxes }] },
