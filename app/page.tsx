@@ -55,7 +55,7 @@ export default function HomePage() {
             Log in to admin
           </Link>
           <Link
-            href="/dashboard"
+            href="/admin"
             className="inline-flex items-center justify-center rounded-2xl border border-white/10 bg-white/[0.04] px-6 py-3 text-sm font-semibold text-slate-200 transition hover:bg-white/[0.08] focus:outline-none focus:ring-2 focus:ring-white/20"
           >
             View dashboard
