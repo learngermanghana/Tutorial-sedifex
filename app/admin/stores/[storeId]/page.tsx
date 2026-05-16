@@ -1,7 +1,8 @@
 import Link from 'next/link';
-import { ArrowLeft, Database, ExternalLink, PackageSearch, ReceiptText, Settings, Store, Webhook } from 'lucide-react';
+import { revalidatePath } from 'next/cache';
+import { ArrowLeft, Database, PackageSearch, ReceiptText, Save, Settings, Store, Webhook } from 'lucide-react';
 import { SectionCard, StatusBadge } from '../../../../components/admin/ui';
-import { getFirebaseEnvStatus, getFirestoreDocument } from '../../../../lib/firebase-admin';
+import { getFirebaseEnvStatus, getFirestoreDocument, setFirestoreDocument } from '../../../../lib/firebase-admin';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -55,6 +56,44 @@ function formatDate(value: unknown) {
   return new Intl.DateTimeFormat('en', { dateStyle: 'medium', timeStyle: 'short' }).format(date);
 }
 
+function stripDocumentMeta(store: StoreRecord) {
+  const copy: Record<string, unknown> = { ...store };
+  delete copy.id;
+  delete copy.path;
+  delete copy.createTime;
+  delete copy.updateTime;
+  return copy;
+}
+
+async function updateGoogleShoppingSettings(storeId: string, formData: FormData) {
+  'use server';
+
+  const current = (await getFirestoreDocument(`storeSettings/${storeId}`)) as StoreRecord;
+  const data = stripDocumentMeta(current);
+  const googleShopping = asObject(data.googleShopping) || {};
+  const catalogSync = asObject(googleShopping.catalogSync) || {};
+  const now = new Date().toISOString();
+  const rawBaseUrl = String(formData.get('integrationBaseUrl') || '').trim();
+
+  data.googleShopping = {
+    ...googleShopping,
+    catalogSync: {
+      ...catalogSync,
+      autoSyncEnabled: formData.get('autoSyncEnabled') === 'on',
+      ...(rawBaseUrl ? { integrationBaseUrl: rawBaseUrl } : {}),
+      status: 'admin_updated',
+      updatedAt: now,
+    },
+  };
+  data.adminUpdatedAt = now;
+  data.adminUpdatedFrom = 'sedifexadmin';
+
+  await setFirestoreDocument(`storeSettings/${storeId}`, data);
+  revalidatePath('/admin');
+  revalidatePath('/admin/stores');
+  revalidatePath(`/admin/stores/${encodeURIComponent(storeId)}`);
+}
+
 async function loadStore(storeId: string) {
   const env = getFirebaseEnvStatus();
   if (!env.ready) return { ok: false, error: 'Firebase envs are not ready in Vercel.', store: null as StoreRecord | null };
@@ -101,6 +140,8 @@ export default async function StoreDetailPage({ params }: { params: Params }) {
 
   const shopping = boolStatus(nestedValue(store, ['googleShopping', 'connection', 'connected']));
   const autoSync = boolStatus(nestedValue(store, ['googleShopping', 'catalogSync', 'autoSyncEnabled']));
+  const integrationBaseUrl = nestedText(store, ['googleShopping', 'catalogSync', 'integrationBaseUrl'], '');
+  const updateAction = updateGoogleShoppingSettings.bind(null, decodedStoreId);
 
   return (
     <div className="space-y-6">
@@ -145,6 +186,40 @@ export default async function StoreDetailPage({ params }: { params: Params }) {
               <InfoRow label="Sync status" value={nestedText(store, ['googleShopping', 'catalogSync', 'status'])} />
             </div>
           </SectionCard>
+
+          <SectionCard title="Safe Google Shopping edit">
+            <form action={updateAction} className="space-y-4">
+              <label className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm">
+                <input
+                  type="checkbox"
+                  name="autoSyncEnabled"
+                  defaultChecked={nestedValue(store, ['googleShopping', 'catalogSync', 'autoSyncEnabled']) === true}
+                  className="mt-1 h-4 w-4 rounded border-slate-300 text-indigo-600"
+                />
+                <span>
+                  <span className="block font-semibold text-slate-950">Enable catalog auto sync</span>
+                  <span className="mt-1 block leading-6 text-slate-600">This only changes googleShopping.catalogSync.autoSyncEnabled for this store.</span>
+                </span>
+              </label>
+
+              <div>
+                <label className="mb-2 block text-sm font-semibold text-slate-800" htmlFor="integrationBaseUrl">Integration base URL</label>
+                <input
+                  id="integrationBaseUrl"
+                  name="integrationBaseUrl"
+                  type="url"
+                  defaultValue={integrationBaseUrl}
+                  placeholder="https://us-central1-project.cloudfunctions.net"
+                  className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-indigo-300 focus:ring-4 focus:ring-indigo-500/10"
+                />
+                <p className="mt-2 text-xs leading-5 text-slate-500">Leaving this empty keeps the existing value unchanged.</p>
+              </div>
+
+              <button className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-indigo-500 px-4 py-3 text-sm font-bold text-white transition hover:bg-indigo-400">
+                <Save className="h-4 w-4" /> Save safe update
+              </button>
+            </form>
+          </SectionCard>
         </div>
 
         <div className="space-y-6">
@@ -165,16 +240,13 @@ export default async function StoreDetailPage({ params }: { params: Params }) {
             </div>
           </SectionCard>
 
-          <SectionCard title="Developer links">
-            <div className="space-y-3">
-              <Link href={`/api/admin/firestore/store-settings/${encodeURIComponent(decodedStoreId)}`} className="flex items-center justify-between rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm font-semibold text-slate-800 hover:bg-indigo-50">
-                Raw store document <ExternalLink className="h-4 w-4 text-slate-400" />
-              </Link>
-              <div className="rounded-2xl bg-slate-50 p-4 text-sm leading-6 text-slate-600">
-                <div className="mb-2 flex items-center gap-2 font-semibold text-slate-950"><Settings className="h-4 w-4 text-indigo-600" /> Write support</div>
-                The next upgrade can add controlled edit forms for safe store settings updates.
+          <SectionCard title="Write safety">
+            <div className="space-y-3 text-sm leading-6 text-slate-600">
+              <div className="rounded-2xl bg-slate-50 p-4">
+                <div className="mb-2 flex items-center gap-2 font-semibold text-slate-950"><Settings className="h-4 w-4 text-indigo-600" /> Controlled fields only</div>
+                The form only updates catalog auto sync, integration base URL, and admin update metadata.
               </div>
-              <div className="rounded-2xl bg-slate-50 p-4 text-sm leading-6 text-slate-600">
+              <div className="rounded-2xl bg-slate-50 p-4">
                 <div className="mb-2 flex items-center gap-2 font-semibold text-slate-950"><Database className="h-4 w-4 text-indigo-600" /> Firestore path</div>
                 storeSettings/{decodedStoreId}
               </div>
