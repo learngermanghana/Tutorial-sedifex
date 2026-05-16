@@ -3,14 +3,14 @@
 import Link from 'next/link';
 import type { ComponentType } from 'react';
 import { usePathname } from 'next/navigation';
-import { Boxes, ChartNoAxesCombined, ChevronRight, Cog, CreditCard, House, KeyRound, Package, Plug, ShoppingBag, ShoppingCart, Store, Users, X } from 'lucide-react';
+import { Boxes, ChartNoAxesCombined, ChevronRight, Cog, CreditCard, House, KeyRound, Mail, Package, Plug, ShoppingBag, ShoppingCart, Store, Users, X } from 'lucide-react';
 
 type Item = { href: string; label: string; icon: ComponentType<{ className?: string }> };
 const groups: { label: string; items: Item[] }[] = [
   { label: 'Overview', items: [{ href: '/admin', label: 'Command Center', icon: House }] },
   { label: 'Commerce', items: [{ href: '/admin/stores', label: 'Stores', icon: Store }, { href: '/admin/products', label: 'Products', icon: Package }, { href: '/admin/marketplace', label: 'Marketplace', icon: ShoppingBag }, { href: '/admin/checkout', label: 'Checkout', icon: CreditCard }, { href: '/admin/google-shopping', label: 'Google Shopping', icon: ShoppingCart }] },
   { label: 'Customers', items: [{ href: '/admin/users', label: 'Admins & Roles', icon: Users }] },
-  { label: 'Engagement', items: [{ href: '/admin', label: 'Campaign Health', icon: ChartNoAxesCombined }] },
+  { label: 'Engagement', items: [{ href: '/admin/marketing', label: 'Marketing Email', icon: Mail }, { href: '/admin', label: 'Campaign Health', icon: ChartNoAxesCombined }] },
   { label: 'Integrations', items: [{ href: '/admin/integrations', label: 'Overview', icon: Plug }, { href: '/admin/integration-keys', label: 'API Keys', icon: KeyRound }, { href: '/admin/webhooks', label: 'Webhooks', icon: Plug }, { href: '/admin/deliveries', label: 'Deliveries', icon: Boxes }] },
   { label: 'Operations', items: [{ href: '/admin/audit-logs', label: 'Audit Logs', icon: ChartNoAxesCombined }] },
   { label: 'Settings', items: [{ href: '/admin/settings', label: 'Preferences', icon: Cog }] },
