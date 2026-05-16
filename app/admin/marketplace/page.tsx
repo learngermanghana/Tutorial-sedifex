@@ -8,6 +8,7 @@ export const runtime = 'nodejs';
 
 type PublicProduct = Record<string, unknown> & {
   id?: string;
+  path?: string;
   storeId?: string;
   productId?: string;
   productName?: string;
@@ -26,6 +27,10 @@ type PublicProduct = Record<string, unknown> & {
 
 function text(value: unknown) {
   return typeof value === 'string' ? value.trim() : '';
+}
+
+function productKey(product: PublicProduct) {
+  return text(product.path) || text(product.id) || text(product.productId) || `${text(product.storeId)}-${productName(product)}`;
 }
 
 function numberValue(value: unknown) {
@@ -189,7 +194,7 @@ export default async function MarketplacePage() {
                 {needsReview.length === 0 ? (
                   <div className="p-8 text-center text-sm text-slate-500">No marketplace product issues found in the loaded sample.</div>
                 ) : needsReview.map(({ product }) => (
-                  <div key={product.path || product.id} className="grid gap-3 px-4 py-4 text-sm lg:grid-cols-[1.2fr_0.9fr_0.7fr_0.7fr_auto] lg:items-center">
+                  <div key={productKey(product)} className="grid gap-3 px-4 py-4 text-sm lg:grid-cols-[1.2fr_0.9fr_0.7fr_0.7fr_auto] lg:items-center">
                     <div className="min-w-0">
                       <p className="truncate font-semibold text-slate-950">{productName(product)}</p>
                       <p className="truncate text-xs text-slate-500">{text(product.productId) || text(product.id) || 'No product ID'}</p>
