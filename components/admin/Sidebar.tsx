@@ -3,12 +3,12 @@
 import Link from 'next/link';
 import type { ComponentType } from 'react';
 import { usePathname } from 'next/navigation';
-import { Boxes, ChartNoAxesCombined, ChevronRight, Cog, House, Package, Plug, Users, X } from 'lucide-react';
+import { Boxes, ChartNoAxesCombined, ChevronRight, Cog, House, Package, Plug, ShoppingBag, Store, Users, X } from 'lucide-react';
 
 type Item = { href: string; label: string; icon: ComponentType<{ className?: string }> };
 const groups: { label: string; items: Item[] }[] = [
   { label: 'Overview', items: [{ href: '/admin', label: 'Command Center', icon: House }] },
-  { label: 'Commerce', items: [{ href: '/admin/stores', label: 'Stores', icon: Package }] },
+  { label: 'Commerce', items: [{ href: '/admin/stores', label: 'Stores', icon: Store }, { href: '/admin/marketplace', label: 'Marketplace', icon: ShoppingBag }] },
   { label: 'Customers', items: [{ href: '/admin/users', label: 'Admins & Roles', icon: Users }] },
   { label: 'Engagement', items: [{ href: '/admin', label: 'Campaign Health', icon: ChartNoAxesCombined }] },
   { label: 'Integrations', items: [{ href: '/admin/integrations', label: 'Overview', icon: Plug }, { href: '/admin/webhooks', label: 'Webhooks', icon: Plug }, { href: '/admin/deliveries', label: 'Deliveries', icon: Boxes }] },
