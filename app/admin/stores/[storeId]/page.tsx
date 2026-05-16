@@ -42,7 +42,7 @@ function nestedText(store: StoreRecord, keys: string[], fallback = 'Not set') {
 }
 
 function storeName(store: StoreRecord) {
-  return fieldText(store, ['storeName', 'name', 'businessName', 'displayName', 'merchantName', 'id'], 'Unnamed store');
+  return fieldText(store, ['displayName', 'name', 'storeName', 'businessName', 'merchantName', 'id'], 'Unnamed store');
 }
 
 function boolStatus(value: unknown) {
@@ -122,8 +122,16 @@ async function loadStore(storeId: string) {
   if (!env.ready) return { ok: false, error: 'Firebase envs are not ready in Vercel.', store: null as StoreRecord | null };
 
   try {
-    const store = await getFirestoreDocument(`storeSettings/${storeId}`);
-    return { ok: true, error: null, store: store as StoreRecord };
+    const [storeProfileRaw, storeSettingsRaw] = await Promise.all([
+      getFirestoreDocument(`stores/${storeId}`).catch(() => null),
+      getFirestoreDocument(`storeSettings/${storeId}`).catch(() => null),
+    ]);
+    const storeProfile = storeProfileRaw as StoreRecord | null;
+    const storeSettings = storeSettingsRaw as StoreRecord | null;
+    if (!storeProfile && !storeSettings) {
+      return { ok: false, error: 'Store not available.', store: null as StoreRecord | null };
+    }
+    return { ok: true, error: null, store: { profile: storeProfile, settings: storeSettings } as unknown as StoreRecord };
   } catch (error) {
     return {
       ok: false,
@@ -131,6 +139,15 @@ async function loadStore(storeId: string) {
       store: null as StoreRecord | null,
     };
   }
+}
+
+function buildLocation(store: StoreRecord) {
+  const parts = ['addressLine1', 'addressLine2', 'city', 'region', 'country', 'postalCode']
+    .map((key) => store[key])
+    .filter((value): value is string | number => (typeof value === 'string' && value.trim().length > 0) || typeof value === 'number')
+    .map((value) => String(value).trim());
+  if (parts.length > 0) return parts.join(', ');
+  return fieldText(store, ['location', 'address', 'businessAddress'], 'Not set');
 }
 
 function InfoRow({ label, value }: { label: string; value: string }) {
@@ -146,9 +163,12 @@ export default async function StoreDetailPage({ params }: { params: Params }) {
   const { storeId } = await params;
   const decodedStoreId = decodeURIComponent(storeId);
   const result = await loadStore(decodedStoreId);
-  const store = result.store;
+  const docs = result.store ? (result.store as unknown as { profile: StoreRecord | null; settings: StoreRecord | null }) : null;
+  const profile = docs?.profile || null;
+  const settings = docs?.settings || null;
+  const identityStore = profile || settings;
 
-  if (!store) {
+  if (!identityStore) {
     return (
       <div className="space-y-6">
         <Link href="/admin/stores" className="inline-flex items-center gap-2 text-sm font-semibold text-indigo-600 hover:text-indigo-500">
@@ -161,9 +181,9 @@ export default async function StoreDetailPage({ params }: { params: Params }) {
     );
   }
 
-  const shopping = boolStatus(nestedValue(store, ['googleShopping', 'connection', 'connected']));
-  const autoSync = boolStatus(nestedValue(store, ['googleShopping', 'catalogSync', 'autoSyncEnabled']));
-  const integrationBaseUrl = nestedText(store, ['googleShopping', 'catalogSync', 'integrationBaseUrl'], '');
+  const shopping = boolStatus(nestedValue(settings || {}, ['googleShopping', 'connection', 'connected']));
+  const autoSync = boolStatus(nestedValue(settings || {}, ['googleShopping', 'catalogSync', 'autoSyncEnabled']));
+  const integrationBaseUrl = nestedText(settings || {}, ['googleShopping', 'catalogSync', 'integrationBaseUrl'], '');
   const updateAction = updateGoogleShoppingSettings.bind(null, decodedStoreId);
 
   return (
@@ -178,8 +198,8 @@ export default async function StoreDetailPage({ params }: { params: Params }) {
             <div className="inline-flex items-center gap-2 rounded-full border border-indigo-300/20 bg-indigo-400/10 px-3 py-1 text-xs font-semibold text-indigo-100">
               <Store className="h-4 w-4" /> Store profile
             </div>
-            <h2 className="mt-5 text-3xl font-bold tracking-tight sm:text-4xl">{storeName(store)}</h2>
-            <p className="mt-2 max-w-2xl text-sm leading-7 text-slate-300">Store ID: {store.id || decodedStoreId}</p>
+            <h2 className="mt-5 text-3xl font-bold tracking-tight sm:text-4xl">{storeName((profile || settings || { id: decodedStoreId }) as StoreRecord)}</h2>
+            <p className="mt-2 max-w-2xl text-sm leading-7 text-slate-300">Store ID: {identityStore.id || decodedStoreId}</p>
           </div>
           <div className="flex flex-wrap gap-2">
             <StatusBadge tone={shopping.tone}>Shopping {shopping.label}</StatusBadge>
@@ -192,28 +212,28 @@ export default async function StoreDetailPage({ params }: { params: Params }) {
         <div className="space-y-6">
           <SectionCard title="Store basics">
             <div className="grid gap-3 sm:grid-cols-2">
-              <InfoRow label="Contact" value={fieldText(store, ['owner', 'ownerName', 'adminName', 'email', 'ownerEmail'])} />
-              <InfoRow label="Phone" value={fieldText(store, ['phone', 'contactPhone', 'businessPhone', 'whatsapp', 'whatsappNumber'])} />
-              <InfoRow label="Location" value={fieldText(store, ['location', 'address', 'businessAddress', 'city', 'country'])} />
-              <InfoRow label="Last updated" value={formatDate(store.updateTime)} />
+              <InfoRow label="Contact" value={fieldText((profile || {}) as StoreRecord, ['email', 'ownerEmail', 'contact', 'adminEmail', 'supportEmail'])} />
+              <InfoRow label="Phone" value={fieldText((profile || {}) as StoreRecord, ['phone', 'contactPhone', 'businessPhone', 'whatsappNumber', 'whatsapp'])} />
+              <InfoRow label="Location" value={buildLocation((profile || {}) as StoreRecord)} />
+              <InfoRow label="Last updated" value={formatDate((profile || settings || {})?.updateTime)} />
             </div>
           </SectionCard>
 
           <SectionCard title="Google Shopping setup">
             <div className="grid gap-3 sm:grid-cols-2">
-              <InfoRow label="Connection" value={nestedText(store, ['googleShopping', 'connection', 'connected'])} />
-              <InfoRow label="Merchant ID" value={nestedText(store, ['googleShopping', 'connection', 'merchantId'])} />
-              <InfoRow label="Auto sync" value={nestedText(store, ['googleShopping', 'catalogSync', 'autoSyncEnabled'])} />
-              <InfoRow label="Integration API key" value={nestedText(store, ['googleShopping', 'catalogSync', 'integrationApiKey'])} />
-              <InfoRow label="Integration base URL" value={nestedText(store, ['googleShopping', 'catalogSync', 'integrationBaseUrl'])} />
-              <InfoRow label="Sync status" value={nestedText(store, ['googleShopping', 'catalogSync', 'status'])} />
+              <InfoRow label="Connection" value={nestedText((settings || {}) as StoreRecord, ['googleShopping', 'connection', 'connected'])} />
+              <InfoRow label="Merchant ID" value={nestedText((settings || {}) as StoreRecord, ['googleShopping', 'connection', 'merchantId'])} />
+              <InfoRow label="Auto sync" value={nestedText((settings || {}) as StoreRecord, ['googleShopping', 'catalogSync', 'autoSyncEnabled'])} />
+              <InfoRow label="Integration API key" value={nestedText((settings || {}) as StoreRecord, ['googleShopping', 'catalogSync', 'integrationApiKey'])} />
+              <InfoRow label="Integration base URL" value={nestedText((settings || {}) as StoreRecord, ['googleShopping', 'catalogSync', 'integrationBaseUrl'])} />
+              <InfoRow label="Sync status" value={nestedText((settings || {}) as StoreRecord, ['googleShopping', 'catalogSync', 'status'])} />
             </div>
           </SectionCard>
 
           <SectionCard title="Safe Google Shopping edit">
             <form action={updateAction} className="space-y-4">
               <label className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm">
-                <input type="checkbox" name="autoSyncEnabled" defaultChecked={nestedValue(store, ['googleShopping', 'catalogSync', 'autoSyncEnabled']) === true} className="mt-1 h-4 w-4 rounded border-slate-300 text-indigo-600" />
+                <input type="checkbox" name="autoSyncEnabled" defaultChecked={nestedValue((settings || {}) as StoreRecord, ['googleShopping', 'catalogSync', 'autoSyncEnabled']) === true} className="mt-1 h-4 w-4 rounded border-slate-300 text-indigo-600" />
                 <span>
                   <span className="block font-semibold text-slate-950">Enable catalog auto sync</span>
                   <span className="mt-1 block leading-6 text-slate-600">This only changes googleShopping.catalogSync.autoSyncEnabled for this store.</span>
