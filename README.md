@@ -15,7 +15,7 @@ Tutorial Sedifex is a Next.js application that serves tutorial content with a da
 - Node.js **20.9+**
 - npm
 
-## Getting Started
+## Getting Started.
 
 1. Install dependencies:
    ```bash
