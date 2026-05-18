@@ -3,12 +3,12 @@
 import Link from 'next/link';
 import type { ComponentType } from 'react';
 import { usePathname } from 'next/navigation';
-import { ChevronRight, House, Package, Store, X } from 'lucide-react';
+import { ChevronRight, House, Package, ShoppingBag, Store, X } from 'lucide-react';
 
 type Item = { href: string; label: string; icon: ComponentType<{ className?: string }> };
 const groups: { label: string; items: Item[] }[] = [
   { label: 'Overview', items: [{ href: '/admin', label: 'Command Center', icon: House }] },
-  { label: 'Commerce', items: [{ href: '/admin/stores', label: 'Stores', icon: Store }, { href: '/admin/products', label: 'Products', icon: Package }] },
+  { label: 'Commerce', items: [{ href: '/admin/stores', label: 'Stores', icon: Store }, { href: '/admin/products', label: 'Products', icon: Package }, { href: '/admin/orders', label: 'Orders', icon: ShoppingBag }] },
 ];
 
 export default function Sidebar({ mobileOpen, onMobileClose }: { mobileOpen: boolean; onMobileClose: () => void }) {
