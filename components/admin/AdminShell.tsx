@@ -12,18 +12,7 @@ import PageHeader from './PageHeader';
 const titleMap: Record<string, { title: string; description: string }> = {
   '/admin': { title: 'Overview', description: 'Monitor the health and performance of your Sedifex platform.' },
   '/admin/stores': { title: 'Stores', description: 'Manage tenant stores, plans, status, and storefront operations.' },
-  '/admin/products': { title: 'Products', description: 'Inspect Sedifex product quality, public catalog readiness, and marketplace gaps.' },
-  '/admin/marketplace': { title: 'Marketplace', description: 'Monitor SedifexMarket visibility, public products, and catalog quality.' },
-  '/admin/checkout': { title: 'Checkout', description: 'Monitor market orders, checkout setup, payment status, and sync health.' },
-  '/admin/google-shopping': { title: 'Google Shopping', description: 'Monitor Merchant Center connections, catalog sync, tokens, and product validation.' },
-  '/admin/integration-keys': { title: 'Integration Keys', description: 'Monitor API keys, active/revoked credentials, last usage, and store access risk.' },
-  '/admin/marketing': { title: 'Marketing', description: 'Send marketing email campaigns to stores or customers and sync them to Apps Script.' },
-  '/admin/users': { title: 'Users', description: 'Control admin access, roles, and account security posture.' },
-  '/admin/integrations': { title: 'Integrations', description: 'Manage API clients, webhooks, credentials, and delivery reliability.' },
-  '/admin/audit-logs': { title: 'Audit Logs', description: 'Trace actor actions and sensitive system changes.' },
-  '/admin/webhooks': { title: 'Webhooks', description: 'Manage endpoints, subscriptions, and webhook health.' },
-  '/admin/deliveries': { title: 'Deliveries', description: 'Inspect delivery outcomes, retries, and incident patterns.' },
-  '/admin/settings': { title: 'Settings', description: 'Configure session, security, and platform-level preferences.' },
+  '/admin/products': { title: 'Products', description: 'Inspect Sedifex product quality and catalog readiness.' },
 };
 
 export default function AdminShell({ children }: { children: ReactNode }) {
