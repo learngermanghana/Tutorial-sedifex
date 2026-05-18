@@ -52,11 +52,32 @@ function itemCount(order: OrderRecord) {
   return order.items?.length || 0;
 }
 
-function formatDate(value?: string) {
-  if (!value) return '—';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString();
+function timestampToMillis(value: unknown): number | null {
+  if (!value) return null;
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  if (typeof value === 'string') {
+    const parsed = Date.parse(value);
+    return Number.isNaN(parsed) ? null : parsed;
+  }
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value.getTime();
+
+  if (typeof value === 'object') {
+    const candidate = value as { toMillis?: unknown; seconds?: unknown; _seconds?: unknown };
+    if (typeof candidate.toMillis === 'function') {
+      const ms = candidate.toMillis();
+      return typeof ms === 'number' && Number.isFinite(ms) ? ms : null;
+    }
+    const seconds = typeof candidate.seconds === 'number' ? candidate.seconds : typeof candidate._seconds === 'number' ? candidate._seconds : null;
+    return seconds !== null ? seconds * 1000 : null;
+  }
+
+  return null;
+}
+
+function formatDate(value: unknown) {
+  const millis = timestampToMillis(value);
+  if (millis === null) return '—';
+  return new Date(millis).toLocaleString();
 }
 
 function csvCell(value: string | number) {
@@ -78,8 +99,8 @@ export default function OrdersPage() {
         const json = await res.json();
         if (!res.ok || !json?.ok) throw new Error(json?.error || 'Failed to load orders');
         const data: OrderRecord[] = (json.data || []).sort((a: OrderRecord, b: OrderRecord) => {
-          const aTime = new Date(a.updatedAt || a.createdAt || 0).getTime();
-          const bTime = new Date(b.updatedAt || b.createdAt || 0).getTime();
+          const aTime = timestampToMillis(a.updatedAt ?? a.createdAt) ?? 0;
+          const bTime = timestampToMillis(b.updatedAt ?? b.createdAt) ?? 0;
           return bTime - aTime;
         });
 
