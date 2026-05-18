@@ -2,18 +2,13 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { LayoutDashboard, Store, Users, Plug, ShieldCheck, Building2, ScrollText, Webhook } from 'lucide-react';
+import { LayoutDashboard, Package, Store } from 'lucide-react';
 import { useAdminContext } from './admin-context';
 
 const items = [
   { href: '/admin', label: 'Dashboard', icon: LayoutDashboard, scopes: ['platform', 'store'] },
-  { href: '/admin/tenants', label: 'Tenants & Stores', icon: Building2, scopes: ['platform'] },
   { href: '/admin/stores', label: 'Stores', icon: Store, scopes: ['platform', 'store'] },
-  { href: '/admin/users', label: 'Users & Roles', icon: Users, scopes: ['platform'] },
-  { href: '/admin/audit-logs', label: 'Audit Logs', icon: ScrollText, scopes: ['platform', 'store'] },
-  { href: '/admin/integrations/clients', label: 'Integration Clients', icon: Plug, scopes: ['platform', 'store'] },
-  { href: '/admin/integrations/webhooks', label: 'Webhook Endpoints', icon: Webhook, scopes: ['platform', 'store'] },
-  { href: '/admin/integrations/deliveries', label: 'Delivery Logs', icon: ShieldCheck, scopes: ['platform', 'store'] },
+  { href: '/admin/products', label: 'Products', icon: Package, scopes: ['platform', 'store'] },
 ];
 
 export default function AdminSidebar() {

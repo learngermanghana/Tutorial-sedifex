@@ -1,1 +1,0 @@
-export default function DeliveryLogsPage(){return <div className="space-y-3"><h2 className="text-2xl font-bold">Delivery Logs</h2><p className="text-gray-600">Filter by date range, status, and event; inspect response code/body snippets and attempts in detail drawer.</p></div>}
