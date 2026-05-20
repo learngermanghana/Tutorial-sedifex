@@ -13,6 +13,7 @@ const titleMap: Record<string, { title: string; description: string }> = {
   '/admin': { title: 'Overview', description: 'Monitor the health and performance of your Sedifex platform.' },
   '/admin/stores': { title: 'Stores', description: 'Manage tenant stores, plans, status, and storefront operations.' },
   '/admin/products': { title: 'Products', description: 'Inspect Sedifex product quality and catalog readiness.' },
+  '/admin/live-chat': { title: 'Live Chat', description: 'Reply to Sedifex Market visitor messages and manage support conversations.' },
 };
 
 export default function AdminShell({ children }: { children: ReactNode }) {
