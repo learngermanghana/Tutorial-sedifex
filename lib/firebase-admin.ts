@@ -79,12 +79,16 @@ function firebaseApp() {
   });
 }
 
-function firestore() {
+export function adminFirestore() {
   const databaseId = process.env.FIREBASE_DATABASE_ID;
   return databaseId ? getFirestore(firebaseApp(), databaseId) : getFirestore(firebaseApp());
 }
 
-function normalizeDocument(snapshot: FirebaseFirestore.DocumentSnapshot) {
+function firestore() {
+  return adminFirestore();
+}
+
+export function normalizeFirestoreDocument(snapshot: FirebaseFirestore.DocumentSnapshot) {
   const data = snapshot.data() || {};
 
   return {
@@ -94,6 +98,10 @@ function normalizeDocument(snapshot: FirebaseFirestore.DocumentSnapshot) {
     createTime: snapshot.createTime?.toDate().toISOString() || null,
     updateTime: snapshot.updateTime?.toDate().toISOString() || null,
   };
+}
+
+function normalizeDocument(snapshot: FirebaseFirestore.DocumentSnapshot) {
+  return normalizeFirestoreDocument(snapshot);
 }
 
 export async function listFirestoreDocuments(collectionPath: string, limit = 25) {
