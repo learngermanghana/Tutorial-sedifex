@@ -266,7 +266,7 @@ function merchantStatus(product: GoogleSyncProduct) {
 }
 
 function storeName(store: StoreRecord) {
-  return firstText(store, ['storeName', 'name', 'businessName', 'displayName', 'merchantName'], store.id);
+  return firstText(store, ['storeName', 'name', 'businessName', 'displayName', 'merchantName', 'title'], store.id);
 }
 
 function buildStoreMap(stores: StoreRecord[]) {
@@ -307,7 +307,7 @@ function itemMatchesStore(product: GoogleSyncProduct, storeId: string) {
   return !storeId || storeId === 'all' || getStoreId(product) === storeId;
 }
 
-async function readCollection(path: GoogleSyncProduct['collectionPath'], sourceLabel: string): Promise<{ documents: GoogleSyncProduct[]; error: string | null }> {
+async function readProductCollection(path: GoogleSyncProduct['collectionPath'], sourceLabel: string): Promise<{ documents: GoogleSyncProduct[]; error: string | null }> {
   try {
     const snapshot = await adminFirestore().collection(path).limit(300).get();
     return {
@@ -339,8 +339,8 @@ async function loadGoogleSyncData(): Promise<GoogleSyncData> {
 
   try {
     const [storesSnapshot, ...collectionReads] = await Promise.all([
-      adminFirestore().collection('storeSettings').limit(300).get(),
-      ...PRODUCT_COLLECTIONS.map((entry) => readCollection(entry.path, entry.label)),
+      adminFirestore().collection('stores').limit(300).get(),
+      ...PRODUCT_COLLECTIONS.map((entry) => readProductCollection(entry.path, entry.label)),
     ]);
 
     const stores = storesSnapshot.docs.map((docSnap) => ({
@@ -364,7 +364,7 @@ async function loadGoogleSyncData(): Promise<GoogleSyncData> {
   } catch (error) {
     return {
       connected: false,
-      error: error instanceof Error ? error.message : 'Unable to load Google sync data.',
+      error: error instanceof Error ? error.message : 'Unable to load Google sync data from /stores.',
       stores: [],
       products: [],
       collectionErrors: {},
@@ -531,12 +531,12 @@ export default async function GoogleSyncPage({ searchParams }: { searchParams?: 
   const riskyProducts = data.products.filter((product) => riskReasons(product).length > 0 && !isManualBlocked(product));
   const blockedProducts = data.products.filter(isManualBlocked);
   const allowedProducts = data.products.filter(isManualAllowed);
-  const reviewProducts = data.products.filter((product) => merchantStatus(product) === 'review');
+  const storeLinkedProducts = data.products.filter((product) => getStoreId(product)).length;
 
   const stats = [
     { label: 'Loaded records', value: data.connected ? String(data.products.length) : 'Setup', delta: data.connected ? 'Across products and public listings' : 'Check Firebase envs' },
+    { label: 'Stores from /stores', value: data.connected ? String(data.stores.length) : '—', delta: 'Store filter and names now use stores collection' },
     { label: 'Allowed for Google', value: data.connected ? String(allowedProducts.length) : '—', delta: 'Manually approved items' },
-    { label: 'Blocked from Google', value: data.connected ? String(blockedProducts.length) : '—', delta: 'Excluded from Merchant feed/API' },
     { label: 'Risk detected', value: data.connected ? String(riskyProducts.length) : '—', delta: 'Medicine, supplement, whitening, health claims' },
   ];
 
@@ -552,7 +552,7 @@ export default async function GoogleSyncPage({ searchParams }: { searchParams?: 
               Choose exactly which products Sedifex can send to Google.
             </h2>
             <p className="mt-4 max-w-3xl text-sm leading-7 text-slate-300">
-              Review marketplace products, detect risky health or supplement claims, block Source 2 style products, and approve only safe items for Google Merchant feeds.
+              Store names and filters now come from <strong>/stores</strong>. Product-level allow/block decisions are still written back to product and public listing records for the Google feed.
             </p>
           </div>
           <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-5">
@@ -561,7 +561,7 @@ export default async function GoogleSyncPage({ searchParams }: { searchParams?: 
               <a className="flex items-center justify-between gap-3 rounded-xl bg-white/5 p-3 text-white transition hover:bg-white/10" href="https://www.sedifexmarket.com/api/google-merchant-feed.xml" target="_blank" rel="noreferrer">
                 XML Merchant feed <ExternalLink className="h-4 w-4" />
               </a>
-              <p className="text-xs leading-5 text-slate-400">Use only one Merchant Center source when possible. This page sets product-level eligibility for the safer feed and Sedifex sync.</p>
+              <p className="text-xs leading-5 text-slate-400">Use the Store Settings page for /storeSettings connection data. This page is for store catalog and Google product selection.</p>
             </div>
           </div>
         </div>
@@ -584,7 +584,7 @@ export default async function GoogleSyncPage({ searchParams }: { searchParams?: 
             <input name="q" defaultValue={query} placeholder="Search name, store, category, supplement, whitening..." className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-indigo-300 focus:ring-4 focus:ring-indigo-500/10" />
           </label>
           <label className="block">
-            <span className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-500"><Store className="h-4 w-4" /> Store</span>
+            <span className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-500"><Store className="h-4 w-4" /> Store from /stores</span>
             <select name="store" defaultValue={selectedStore} className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-indigo-300 focus:ring-4 focus:ring-indigo-500/10">
               <option value="all">All stores</option>
               {data.stores.map((store) => <option key={store.id} value={store.id}>{storeName(store)}</option>)}
@@ -666,6 +666,23 @@ export default async function GoogleSyncPage({ searchParams }: { searchParams?: 
           )}
         </SectionCard>
       </form>
+
+      <SectionCard title="Store matching note">
+        <div className="grid gap-4 text-sm leading-6 text-slate-600 md:grid-cols-3">
+          <div className="rounded-2xl bg-slate-50 p-4">
+            <p className="font-semibold text-slate-950">Stores source</p>
+            <p className="mt-1">This page now reads business/store names from <code>/stores</code>.</p>
+          </div>
+          <div className="rounded-2xl bg-slate-50 p-4">
+            <p className="font-semibold text-slate-950">Store settings</p>
+            <p className="mt-1">Use <Link className="font-semibold text-indigo-600" href="/admin/store-settings">Store Settings</Link> for <code>/storeSettings</code> Google connection and integration details.</p>
+          </div>
+          <div className="rounded-2xl bg-slate-50 p-4">
+            <p className="font-semibold text-slate-950">Linked products</p>
+            <p className="mt-1">{storeLinkedProducts} products currently have a storeId that can match a store document.</p>
+          </div>
+        </div>
+      </SectionCard>
 
       {Object.keys(data.collectionErrors).length > 0 ? (
         <SectionCard title="Collection notices">
