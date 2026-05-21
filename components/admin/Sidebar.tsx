@@ -30,7 +30,7 @@ const groups: { label: string; items: Item[] }[] = [
       { href: '/admin/store-settings', label: 'Store Settings', icon: Settings },
       { href: '/admin/products', label: 'Catalog Review', icon: Package },
       { href: '/admin/google-sync', label: 'Google Sync', icon: PackageCheck },
-      { href: '/admin/catalog-repair', label: 'Catalog Repair', icon: Hammer },
+      { href: '/admin/catalog-sync', label: 'Catalog Sync', icon: Hammer },
       { href: '/admin/orders', label: 'Orders', icon: ShoppingBag },
     ],
   },
@@ -70,6 +70,8 @@ export default function Sidebar({ mobileOpen, onMobileClose }: { mobileOpen: boo
                   <Link
                     key={`${group.label}-${item.label}`}
                     href={item.href}
+                    prefetch={false}
+                    onClick={onMobileClose}
                     className={`flex items-center justify-between rounded-xl px-3 py-2 text-sm transition ${active ? 'bg-slate-800 text-white shadow' : 'text-slate-300 hover:bg-slate-900 hover:text-white'}`}
                   >
                     <span className="flex items-center gap-2"><Icon className="h-4 w-4" />{item.label}</span>
