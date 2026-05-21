@@ -10,6 +10,12 @@ export const runtime = 'nodejs';
 
 type StoreRecord = Record<string, unknown> & { id: string; path: string };
 type ProductRecord = Record<string, unknown> & { id: string; path: string };
+type StoreRiskData = {
+  error: string | null;
+  stores: StoreRecord[];
+  riskCounts: Map<string, number>;
+  productCounts: Map<string, number>;
+};
 
 function text(value: unknown, fallback = '') {
   if (typeof value === 'string') return value.trim() || fallback;
@@ -54,9 +60,16 @@ function productStoreId(product: ProductRecord) {
   return text(product.storeId || product.ownerStoreId || product.businessId || product.tenantStoreId);
 }
 
-async function loadStoresAndRiskCounts() {
+async function loadStoresAndRiskCounts(): Promise<StoreRiskData> {
   const env = getFirebaseEnvStatus();
-  if (!env.ready) return { error: 'Firebase environment variables are not ready.', stores: [] as StoreRecord[], riskCounts: new Map<string, number>(), productCounts: new Map<string, number>() };
+  if (!env.ready) {
+    return {
+      error: 'Firebase environment variables are not ready.',
+      stores: [],
+      riskCounts: new Map<string, number>(),
+      productCounts: new Map<string, number>(),
+    };
+  }
 
   const db = adminFirestore();
   const [storesSnap, productsSnap, listingsSnap, publicProductsSnap, publicServicesSnap] = await Promise.all([
@@ -67,9 +80,9 @@ async function loadStoresAndRiskCounts() {
     db.collection('publicServices').limit(600).get(),
   ]);
 
-  const stores = storesSnap.docs.map((doc) => ({ ...(doc.data() as Record<string, unknown>), id: doc.id, path: doc.ref.path }));
+  const stores: StoreRecord[] = storesSnap.docs.map((doc) => ({ ...(doc.data() as Record<string, unknown>), id: doc.id, path: doc.ref.path }));
   const products: ProductRecord[] = [productsSnap, listingsSnap, publicProductsSnap, publicServicesSnap].flatMap((snap) =>
-    snap.docs.map((doc) => ({ ...(doc.data() as Record<string, unknown>), id: doc.id, path: doc.ref.path })),
+    snap.docs.map((doc) => ({ ...(doc.data() as Record<string, unknown>), id: doc.id, path: doc.ref.path } as ProductRecord)),
   );
 
   const riskCounts = new Map<string, number>();
