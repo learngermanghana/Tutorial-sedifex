@@ -1,14 +1,18 @@
 import Link from 'next/link';
 import {
+  AlertTriangle,
   ArrowUpRight,
   CheckCircle2,
   CircleAlert,
+  CreditCard,
   Database,
   KeyRound,
   PackageSearch,
   ReceiptText,
+  RefreshCw,
   Server,
   ShieldCheck,
+  ShoppingBag,
   Store,
   Webhook,
   Zap,
@@ -26,31 +30,177 @@ type DashboardRecord = Record<string, unknown> & {
   createTime?: string | null;
 };
 
+type CollectionResult = {
+  ok: boolean;
+  error: string | null;
+  documents: DashboardRecord[];
+};
+
 type DashboardData = {
   connected: boolean;
   error: string | null;
   stores: DashboardRecord[];
+  orders: DashboardRecord[];
+  catalogItems: DashboardRecord[];
+  deliveries: DashboardRecord[];
+  collectionErrors: Record<string, string>;
+};
+
+type AlertItem = {
+  title: string;
+  description: string;
+  href: string;
+  tone: 'green' | 'yellow' | 'red' | 'blue' | 'slate';
+  icon: typeof AlertTriangle;
 };
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
 }
 
-function getNestedBoolean(record: DashboardRecord, path: string[]) {
+function getNestedValue(record: DashboardRecord, path: string[]) {
   let current: unknown = record;
 
   for (const key of path) {
     const obj = asRecord(current);
-    if (!obj || !(key in obj)) return false;
+    if (!obj || !(key in obj)) return undefined;
     current = obj[key];
   }
 
-  return current === true;
+  return current;
+}
+
+function getNestedBoolean(record: DashboardRecord, path: string[]) {
+  return getNestedValue(record, path) === true;
+}
+
+function getText(record: DashboardRecord, fields: string[], fallback = '') {
+  for (const field of fields) {
+    const value = record[field];
+    if (typeof value === 'string' && value.trim()) return value.trim();
+    if (typeof value === 'number') return String(value);
+  }
+  return fallback;
 }
 
 function getStoreName(record: DashboardRecord) {
-  const candidates = [record.storeName, record.name, record.businessName, record.displayName, record.id];
+  const candidates = [record.storeName, record.name, record.businessName, record.displayName, record.merchantName, record.id];
   return String(candidates.find((item) => typeof item === 'string' && item.trim()) || 'Unnamed store');
+}
+
+function timestampToMillis(value: unknown): number | null {
+  if (!value) return null;
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  if (typeof value === 'string') {
+    const parsed = Date.parse(value);
+    return Number.isNaN(parsed) ? null : parsed;
+  }
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value.getTime();
+
+  if (typeof value === 'object') {
+    const candidate = value as { seconds?: unknown; _seconds?: unknown; toMillis?: unknown };
+    if (typeof candidate.toMillis === 'function') {
+      const millis = candidate.toMillis();
+      return typeof millis === 'number' && Number.isFinite(millis) ? millis : null;
+    }
+    const seconds = typeof candidate.seconds === 'number' ? candidate.seconds : typeof candidate._seconds === 'number' ? candidate._seconds : null;
+    return seconds !== null ? seconds * 1000 : null;
+  }
+
+  return null;
+}
+
+function recordTime(record: DashboardRecord) {
+  return (
+    timestampToMillis(record.paymentUpdatedAt) ??
+    timestampToMillis(record.updatedAt) ??
+    timestampToMillis(record.updated_at) ??
+    timestampToMillis(record.updateTime) ??
+    timestampToMillis(record.createdAt) ??
+    timestampToMillis(record.createTime)
+  );
+}
+
+function isToday(record: DashboardRecord) {
+  const millis = recordTime(record);
+  if (millis === null) return false;
+  const date = new Date(millis);
+  const today = new Date();
+  return date.getFullYear() === today.getFullYear() && date.getMonth() === today.getMonth() && date.getDate() === today.getDate();
+}
+
+function isRecent(record: DashboardRecord, days = 7) {
+  const millis = recordTime(record);
+  return millis !== null && Date.now() - millis < days * 24 * 60 * 60 * 1000;
+}
+
+function moneyAmount(order: DashboardRecord) {
+  const candidates = [order.finalTotal, order.amountPaid, order.amount, order.total, order.grandTotal];
+  const value = candidates.find((item) => typeof item === 'number');
+  if (typeof value === 'number') return value;
+  if (typeof order.amountMinor === 'number') return order.amountMinor / 100;
+  return 0;
+}
+
+function formatMoney(value: number) {
+  return `GHS ${value.toLocaleString('en', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+function orderStatus(order: DashboardRecord) {
+  return getText(order, ['paymentStatus', 'orderStatus', 'status'], '').toLowerCase();
+}
+
+function isFailedOrder(order: DashboardRecord) {
+  const status = orderStatus(order);
+  return ['failed', 'error', 'cancelled', 'canceled', 'declined', 'abandoned'].some((word) => status.includes(word));
+}
+
+function hasImage(item: DashboardRecord) {
+  const stringFields = ['image', 'imageUrl', 'imageURL', 'photo', 'photoUrl', 'thumbnail', 'coverImage', 'mainImage'];
+  if (stringFields.some((field) => typeof item[field] === 'string' && String(item[field]).trim())) return true;
+  const arrays = [item.images, item.gallery, item.photos];
+  return arrays.some((value) => Array.isArray(value) && value.length > 0);
+}
+
+function hasPrice(item: DashboardRecord) {
+  const fields = ['price', 'amount', 'salePrice', 'regularPrice', 'finalPrice', 'courseFee', 'servicePrice'];
+  return fields.some((field) => {
+    const value = item[field];
+    if (typeof value === 'number') return value > 0;
+    if (typeof value === 'string') return Number(value.replace(/[^0-9.]/g, '')) > 0;
+    return false;
+  });
+}
+
+function hasCategory(item: DashboardRecord) {
+  return Boolean(getText(item, ['category', 'categoryName', 'categoryId', 'type', 'itemType', 'serviceCategory', 'courseCategory'], ''));
+}
+
+function marketVisible(item: DashboardRecord) {
+  if (item.marketplaceVisible === true || item.showOnMarket === true || item.isPublished === true || item.active === true) return true;
+  const status = getText(item, ['status', 'visibility', 'state'], '').toLowerCase();
+  return ['active', 'published', 'visible', 'live'].includes(status);
+}
+
+function checkoutLooksConfigured(store: DashboardRecord) {
+  const directFields = ['merchantId', 'merchantToken', 'paystackSubaccount', 'paystackSubaccountCode', 'checkoutEnabled'];
+  if (directFields.some((field) => Boolean(store[field]))) return true;
+  const payment = asRecord(store.payment) || asRecord(store.payments) || asRecord(store.checkout) || asRecord(store.billing);
+  if (!payment) return false;
+  return Object.values(payment).some((value) => value === true || (typeof value === 'string' && value.trim().length > 0));
+}
+
+async function readCollection(collectionPath: string, limit = 100): Promise<CollectionResult> {
+  try {
+    const result = await listFirestoreDocuments(collectionPath, limit);
+    return { ok: true, error: null, documents: result.documents as DashboardRecord[] };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : `Unable to read ${collectionPath}.`,
+      documents: [],
+    };
+  }
 }
 
 async function getDashboardData(): Promise<DashboardData> {
@@ -61,106 +211,168 @@ async function getDashboardData(): Promise<DashboardData> {
       connected: false,
       error: 'Firebase environment variables are not ready in this deployment.',
       stores: [],
+      orders: [],
+      catalogItems: [],
+      deliveries: [],
+      collectionErrors: {},
     };
   }
 
-  try {
-    const result = await listFirestoreDocuments('storeSettings', 50);
-    return {
-      connected: true,
-      error: null,
-      stores: result.documents,
-    };
-  } catch (error) {
-    return {
-      connected: false,
-      error: error instanceof Error ? error.message : 'Unable to read storeSettings from Firestore.',
-      stores: [],
-    };
-  }
+  const [stores, orders, products, services, courses, catalogItems, deliveries] = await Promise.all([
+    readCollection('storeSettings', 100),
+    readCollection('integrationOrders', 100),
+    readCollection('products', 100),
+    readCollection('services', 100),
+    readCollection('courses', 100),
+    readCollection('catalogItems', 100),
+    readCollection('webhookDeliveries', 100),
+  ]);
+
+  const collectionErrors: Record<string, string> = {};
+  Object.entries({ storeSettings: stores, integrationOrders: orders, products, services, courses, catalogItems, webhookDeliveries: deliveries }).forEach(([key, result]) => {
+    if (!result.ok && result.error) collectionErrors[key] = result.error;
+  });
+
+  return {
+    connected: stores.ok,
+    error: stores.error,
+    stores: stores.documents,
+    orders: orders.documents,
+    catalogItems: [...products.documents, ...services.documents, ...courses.documents, ...catalogItems.documents],
+    deliveries: deliveries.documents,
+    collectionErrors,
+  };
 }
 
 const quickActions = [
   {
-    title: 'View store settings API',
-    description: 'Open the live route that reads storeSettings from the Sedifex database.',
-    href: '/api/admin/firestore/store-settings',
-    icon: Database,
-  },
-  {
-    title: 'Review integrations',
-    description: 'Manage API clients, credentials, webhook endpoints, and scopes.',
-    href: '/admin/integrations',
-    icon: KeyRound,
-  },
-  {
-    title: 'Check webhook deliveries',
-    description: 'Inspect delivery results, retries, and recent delivery status.',
-    href: '/admin/deliveries',
-    icon: Webhook,
-  },
-  {
-    title: 'Open store operations',
-    description: 'Move toward one place for stores, products, orders, and bookings.',
+    title: 'Fix store setup',
+    description: 'Open stores that need checkout, catalog, Google Shopping, or integration review.',
     href: '/admin/stores',
     icon: Store,
   },
-];
-
-const setupSteps = [
   {
-    title: 'Read storeSettings from Firestore',
-    description: 'The dashboard now loads real storeSettings documents when Firebase envs are present.',
-    status: 'Added',
-    tone: 'green' as const,
+    title: 'Review catalog quality',
+    description: 'Find products, services, and courses that are not ready for Sedifex Market.',
+    href: '/admin/products',
+    icon: PackageSearch,
   },
   {
-    title: 'Add store detail pages',
-    description: 'Create a store profile page that shows settings, products, bookings, checkout setup, and integrations.',
-    status: 'Next',
-    tone: 'yellow' as const,
+    title: 'Monitor orders',
+    description: 'Check paid, pending, and failed marketplace or website checkout orders.',
+    href: '/admin/orders',
+    icon: ShoppingBag,
   },
   {
-    title: 'Move production storage away from JSON file',
-    description: 'Use the production database for integration clients and webhooks.',
-    status: 'Planned',
-    tone: 'slate' as const,
+    title: 'Check webhook deliveries',
+    description: 'Inspect delivery results, retries, and recent sync status.',
+    href: '/admin/deliveries',
+    icon: Webhook,
   },
 ];
 
 export default async function AdminDashboardPage() {
   const dashboard = await getDashboardData();
   const stores = dashboard.stores;
+  const orders = dashboard.orders;
+  const catalogItems = dashboard.catalogItems;
+  const deliveries = dashboard.deliveries;
+
   const googleShoppingConnected = stores.filter((store) => getNestedBoolean(store, ['googleShopping', 'connection', 'connected'])).length;
   const autoSyncEnabled = stores.filter((store) => getNestedBoolean(store, ['googleShopping', 'catalogSync', 'autoSyncEnabled'])).length;
-  const recentlyUpdated = stores.filter((store) => {
-    if (!store.updateTime || typeof store.updateTime !== 'string') return false;
-    const updatedAt = new Date(store.updateTime).getTime();
-    return Number.isFinite(updatedAt) && Date.now() - updatedAt < 7 * 24 * 60 * 60 * 1000;
+  const checkoutReviewCount = stores.filter((store) => !checkoutLooksConfigured(store)).length;
+  const recentlyUpdatedStores = stores.filter((store) => isRecent(store, 7)).length;
+  const ordersToday = orders.filter(isToday);
+  const failedOrders = orders.filter(isFailedOrder);
+  const revenueToday = ordersToday.reduce((sum, order) => sum + moneyAmount(order), 0);
+  const catalogMissingImage = catalogItems.filter((item) => !hasImage(item)).length;
+  const catalogMissingPrice = catalogItems.filter((item) => !hasPrice(item)).length;
+  const catalogMissingCategory = catalogItems.filter((item) => !hasCategory(item)).length;
+  const marketVisibleItems = catalogItems.filter(marketVisible).length;
+  const failedDeliveries = deliveries.filter((delivery) => {
+    const status = getText(delivery, ['status', 'deliveryStatus', 'state'], '').toLowerCase();
+    return ['failed', 'error', 'retrying'].some((word) => status.includes(word));
   }).length;
 
   const metrics = [
     {
-      label: 'Store settings',
+      label: 'Stores monitored',
       value: dashboard.connected ? String(stores.length) : 'Setup',
-      delta: dashboard.connected ? 'Loaded from Firestore' : 'Check Firebase envs',
+      delta: dashboard.connected ? `${recentlyUpdatedStores} updated recently` : 'Check Firebase envs',
     },
     {
-      label: 'Google Shopping',
-      value: dashboard.connected ? String(googleShoppingConnected) : '—',
-      delta: 'Connected stores found',
+      label: 'Orders today',
+      value: dashboard.connected ? String(ordersToday.length) : '—',
+      delta: dashboard.connected ? formatMoney(revenueToday) : 'Database not ready',
     },
     {
-      label: 'Auto sync enabled',
-      value: dashboard.connected ? String(autoSyncEnabled) : '—',
-      delta: 'Catalog sync setting active',
+      label: 'Checkout reviews',
+      value: dashboard.connected ? String(checkoutReviewCount) : '—',
+      delta: 'Stores needing setup check',
     },
     {
-      label: 'Recently updated',
-      value: dashboard.connected ? String(recentlyUpdated) : '—',
-      delta: 'Updated in the last 7 days',
+      label: 'Market-ready catalog',
+      value: dashboard.connected ? `${marketVisibleItems}/${catalogItems.length}` : '—',
+      delta: 'Visible items / total items',
     },
   ];
+
+  const alerts: AlertItem[] = [
+    !dashboard.connected
+      ? {
+          title: 'Firebase is not connected',
+          description: dashboard.error || 'The admin cannot read live Sedifex data until Firebase envs are configured.',
+          href: '/admin/settings',
+          tone: 'red',
+          icon: Database,
+        }
+      : null,
+    failedOrders.length > 0
+      ? {
+          title: `${failedOrders.length} failed or cancelled orders`,
+          description: 'Review failed payments and checkout records before customers or stores complain.',
+          href: '/admin/orders',
+          tone: 'red',
+          icon: CreditCard,
+        }
+      : null,
+    checkoutReviewCount > 0
+      ? {
+          title: `${checkoutReviewCount} stores need checkout review`,
+          description: 'Some stores may be missing payment or checkout configuration.',
+          href: '/admin/stores',
+          tone: 'yellow',
+          icon: CircleAlert,
+        }
+      : null,
+    catalogMissingImage + catalogMissingPrice + catalogMissingCategory > 0
+      ? {
+          title: 'Catalog quality needs attention',
+          description: `${catalogMissingImage} missing images, ${catalogMissingPrice} missing prices, ${catalogMissingCategory} missing categories.`,
+          href: '/admin/products',
+          tone: 'yellow',
+          icon: PackageSearch,
+        }
+      : null,
+    failedDeliveries > 0
+      ? {
+          title: `${failedDeliveries} webhook deliveries need review`,
+          description: 'Retry failed syncs for bookings, orders, and partner automations.',
+          href: '/admin/deliveries',
+          tone: 'red',
+          icon: Webhook,
+        }
+      : null,
+    dashboard.connected && stores.length > 0 && failedOrders.length === 0 && checkoutReviewCount === 0
+      ? {
+          title: 'Core operations look healthy',
+          description: 'Stores loaded successfully and no urgent checkout failures were detected from the latest records.',
+          href: '/admin/stores',
+          tone: 'green',
+          icon: CheckCircle2,
+        }
+      : null,
+  ].filter(Boolean) as AlertItem[];
 
   const healthItems = [
     { label: 'Admin login', value: 'Ready', icon: ShieldCheck, tone: 'green' as const },
@@ -170,43 +382,55 @@ export default async function AdminDashboardPage() {
       icon: Database,
       tone: dashboard.connected ? ('green' as const) : ('yellow' as const),
     },
-    { label: 'Webhook pages', value: 'Available', icon: Zap, tone: 'blue' as const },
-    { label: 'JSON file storage', value: 'Local only', icon: Server, tone: 'red' as const },
+    { label: 'Google Shopping stores', value: dashboard.connected ? `${googleShoppingConnected}/${stores.length}` : '—', icon: PackageSearch, tone: googleShoppingConnected > 0 ? ('green' as const) : ('slate' as const) },
+    { label: 'Catalog auto sync', value: dashboard.connected ? `${autoSyncEnabled}/${stores.length}` : '—', icon: RefreshCw, tone: autoSyncEnabled > 0 ? ('blue' as const) : ('slate' as const) },
+    { label: 'Webhook failures', value: dashboard.connected ? String(failedDeliveries) : '—', icon: Server, tone: failedDeliveries > 0 ? ('red' as const) : ('green' as const) },
   ];
+
+  const watchlist = [
+    { label: 'Stores without Google Shopping', value: Math.max(stores.length - googleShoppingConnected, 0), href: '/admin/stores', tone: 'slate' as const },
+    { label: 'Stores without auto sync', value: Math.max(stores.length - autoSyncEnabled, 0), href: '/admin/stores', tone: 'slate' as const },
+    { label: 'Failed orders', value: failedOrders.length, href: '/admin/orders', tone: failedOrders.length > 0 ? ('red' as const) : ('green' as const) },
+    { label: 'Catalog missing image', value: catalogMissingImage, href: '/admin/products', tone: catalogMissingImage > 0 ? ('yellow' as const) : ('green' as const) },
+    { label: 'Catalog missing price', value: catalogMissingPrice, href: '/admin/products', tone: catalogMissingPrice > 0 ? ('yellow' as const) : ('green' as const) },
+  ];
+
+  const recentStores = [...stores]
+    .sort((a, b) => (recordTime(b) || 0) - (recordTime(a) || 0))
+    .slice(0, 5);
 
   return (
     <div className="space-y-6">
       <section className="rounded-3xl border border-slate-200 bg-slate-950 p-6 text-white shadow-sm sm:p-8">
-        <div className="grid gap-8 lg:grid-cols-[1.2fr_0.8fr] lg:items-center">
+        <div className="grid gap-8 lg:grid-cols-[1.25fr_0.75fr] lg:items-center">
           <div>
             <div className="inline-flex items-center gap-2 rounded-full border border-indigo-300/20 bg-indigo-400/10 px-3 py-1 text-xs font-semibold text-indigo-100">
-              <CheckCircle2 className="h-4 w-4" />
-              Sedifex admin workspace
+              <Zap className="h-4 w-4" /> Sedifex Command Center
             </div>
-            <h2 className="mt-5 max-w-2xl text-3xl font-bold tracking-tight sm:text-4xl">
-              Control stores, checkout, products, bookings, and integrations from one place.
+            <h2 className="mt-5 max-w-3xl text-3xl font-bold tracking-tight sm:text-4xl">
+              See what is wrong today, what is making money, and what needs fixing first.
             </h2>
             <p className="mt-4 max-w-2xl text-sm leading-7 text-slate-300">
-              The overview now reads live storeSettings data when the Firebase connection is available.
+              This admin overview now checks store setup, orders, catalog readiness, Google Shopping, auto sync, and webhook health from one place.
             </p>
           </div>
 
           <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-5">
-            <p className="text-sm font-semibold text-slate-200">Production focus</p>
+            <p className="text-sm font-semibold text-slate-200">Today&apos;s business health</p>
             <div className="mt-4 space-y-3 text-sm text-slate-300">
               <div className="flex items-center justify-between gap-3">
-                <span>Fast admin UI</span>
-                <StatusBadge tone="green">Improved</StatusBadge>
+                <span>Orders today</span>
+                <StatusBadge tone="blue">{dashboard.connected ? ordersToday.length : '—'}</StatusBadge>
               </div>
               <div className="flex items-center justify-between gap-3">
-                <span>Database data</span>
-                <StatusBadge tone={dashboard.connected ? 'green' : 'yellow'}>
-                  {dashboard.connected ? 'Connected' : 'Setup needed'}
+                <span>Revenue today</span>
+                <StatusBadge tone="green">{dashboard.connected ? formatMoney(revenueToday) : '—'}</StatusBadge>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <span>Urgent alerts</span>
+                <StatusBadge tone={alerts.some((alert) => alert.tone === 'red') ? 'red' : alerts.length > 0 ? 'yellow' : 'green'}>
+                  {alerts.length}
                 </StatusBadge>
-              </div>
-              <div className="flex items-center justify-between gap-3">
-                <span>Store settings loaded</span>
-                <StatusBadge tone="blue">{stores.length}</StatusBadge>
               </div>
             </div>
           </div>
@@ -225,16 +449,29 @@ export default async function AdminDashboardPage() {
         ))}
       </section>
 
-      <section className="grid gap-6 xl:grid-cols-3">
-        <div className="space-y-6 xl:col-span-2">
-          <SectionCard
-            title="Next actions"
-            action={
-              <Link href="/admin/settings" className="text-xs font-semibold text-indigo-600 hover:text-indigo-500">
-                Settings
-              </Link>
-            }
-          >
+      <section className="grid gap-6 xl:grid-cols-[1.25fr_0.75fr]">
+        <div className="space-y-6">
+          <SectionCard title="What needs attention first">
+            <div className="grid gap-4 md:grid-cols-2">
+              {alerts.map((alert) => {
+                const Icon = alert.icon;
+                return (
+                  <Link key={alert.title} href={alert.href} className="group rounded-2xl border border-slate-200 bg-slate-50 p-4 transition hover:border-indigo-200 hover:bg-indigo-50/60">
+                    <div className="flex items-start justify-between gap-4">
+                      <span className="rounded-2xl bg-white p-3 text-indigo-600 shadow-sm ring-1 ring-slate-200 transition group-hover:ring-indigo-200">
+                        <Icon className="h-5 w-5" />
+                      </span>
+                      <StatusBadge tone={alert.tone}>{alert.tone === 'red' ? 'Urgent' : alert.tone === 'yellow' ? 'Review' : alert.tone === 'green' ? 'Healthy' : 'Info'}</StatusBadge>
+                    </div>
+                    <h3 className="mt-4 text-sm font-semibold text-slate-950">{alert.title}</h3>
+                    <p className="mt-2 text-sm leading-6 text-slate-600">{alert.description}</p>
+                  </Link>
+                );
+              })}
+            </div>
+          </SectionCard>
+
+          <SectionCard title="Fast actions">
             <div className="grid gap-4 sm:grid-cols-2">
               {quickActions.map((action) => {
                 const Icon = action.icon;
@@ -242,10 +479,10 @@ export default async function AdminDashboardPage() {
                   <Link
                     key={action.title}
                     href={action.href}
-                    className="group rounded-2xl border border-slate-200 bg-slate-50 p-4 transition hover:border-indigo-200 hover:bg-indigo-50/60"
+                    className="group rounded-2xl border border-slate-200 bg-white p-4 transition hover:border-indigo-200 hover:bg-indigo-50/60"
                   >
                     <div className="flex items-start justify-between gap-4">
-                      <span className="rounded-2xl bg-white p-3 text-indigo-600 shadow-sm ring-1 ring-slate-200 transition group-hover:ring-indigo-200">
+                      <span className="rounded-2xl bg-slate-50 p-3 text-indigo-600 shadow-sm ring-1 ring-slate-200 transition group-hover:ring-indigo-200">
                         <Icon className="h-5 w-5" />
                       </span>
                       <ArrowUpRight className="h-4 w-4 text-slate-400 transition group-hover:text-indigo-500" />
@@ -258,55 +495,39 @@ export default async function AdminDashboardPage() {
             </div>
           </SectionCard>
 
-          <SectionCard title="Store settings preview">
-            {stores.length > 0 ? (
+          <SectionCard title="Recent store movement">
+            {recentStores.length > 0 ? (
               <div className="overflow-hidden rounded-2xl border border-slate-200">
-                <div className="grid grid-cols-[1.2fr_0.7fr_0.7fr] bg-slate-50 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                <div className="grid grid-cols-[1.3fr_0.7fr_0.7fr] bg-slate-50 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
                   <span>Store</span>
                   <span>Shopping</span>
                   <span>Auto sync</span>
                 </div>
                 <div className="divide-y divide-slate-200">
-                  {stores.slice(0, 6).map((store) => (
-                    <div key={store.path || store.id} className="grid grid-cols-[1.2fr_0.7fr_0.7fr] items-center px-4 py-3 text-sm">
-                      <div className="min-w-0">
-                        <p className="truncate font-semibold text-slate-950">{getStoreName(store)}</p>
-                        <p className="truncate text-xs text-slate-500">{store.id}</p>
-                      </div>
-                      <StatusBadge tone={getNestedBoolean(store, ['googleShopping', 'connection', 'connected']) ? 'green' : 'slate'}>
-                        {getNestedBoolean(store, ['googleShopping', 'connection', 'connected']) ? 'On' : 'Off'}
-                      </StatusBadge>
-                      <StatusBadge tone={getNestedBoolean(store, ['googleShopping', 'catalogSync', 'autoSyncEnabled']) ? 'green' : 'slate'}>
-                        {getNestedBoolean(store, ['googleShopping', 'catalogSync', 'autoSyncEnabled']) ? 'On' : 'Off'}
-                      </StatusBadge>
-                    </div>
-                  ))}
+                  {recentStores.map((store) => {
+                    const storeId = String(store.id || '');
+                    return (
+                      <Link key={store.path || store.id} href={storeId ? `/admin/stores/${encodeURIComponent(storeId)}` : '/admin/stores'} className="grid grid-cols-[1.3fr_0.7fr_0.7fr] items-center px-4 py-3 text-sm transition hover:bg-indigo-50/60">
+                        <div className="min-w-0">
+                          <p className="truncate font-semibold text-slate-950">{getStoreName(store)}</p>
+                          <p className="truncate text-xs text-slate-500">{store.id}</p>
+                        </div>
+                        <StatusBadge tone={getNestedBoolean(store, ['googleShopping', 'connection', 'connected']) ? 'green' : 'slate'}>
+                          {getNestedBoolean(store, ['googleShopping', 'connection', 'connected']) ? 'On' : 'Off'}
+                        </StatusBadge>
+                        <StatusBadge tone={getNestedBoolean(store, ['googleShopping', 'catalogSync', 'autoSyncEnabled']) ? 'green' : 'slate'}>
+                          {getNestedBoolean(store, ['googleShopping', 'catalogSync', 'autoSyncEnabled']) ? 'On' : 'Off'}
+                        </StatusBadge>
+                      </Link>
+                    );
+                  })}
                 </div>
               </div>
             ) : (
               <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-6 text-sm leading-6 text-slate-600">
-                No storeSettings documents are loaded yet. After the Firebase envs are added and the collection has documents, they will appear here.
+                No recent store records are loaded yet. After Firebase envs are added and storeSettings has documents, activity will appear here.
               </div>
             )}
-          </SectionCard>
-
-          <SectionCard title="Production rollout plan">
-            <div className="space-y-3">
-              {setupSteps.map((step, index) => (
-                <div key={step.title} className="flex gap-4 rounded-2xl border border-slate-200 bg-white p-4">
-                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-slate-100 text-sm font-bold text-slate-700">
-                    {index + 1}
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <h3 className="text-sm font-semibold text-slate-950">{step.title}</h3>
-                      <StatusBadge tone={step.tone}>{step.status}</StatusBadge>
-                    </div>
-                    <p className="mt-1 text-sm leading-6 text-slate-600">{step.description}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
           </SectionCard>
         </div>
 
@@ -330,31 +551,57 @@ export default async function AdminDashboardPage() {
             </div>
           </SectionCard>
 
-          <SectionCard title="What this admin should monitor">
+          <SectionCard title="Watchlist">
+            <div className="space-y-3">
+              {watchlist.map((item) => (
+                <Link key={item.label} href={item.href} className="flex items-center justify-between rounded-2xl bg-slate-50 p-4 text-sm transition hover:bg-indigo-50/60">
+                  <span className="font-medium text-slate-700">{item.label}</span>
+                  <StatusBadge tone={item.tone}>{item.value}</StatusBadge>
+                </Link>
+              ))}
+            </div>
+          </SectionCard>
+
+          <SectionCard title="Data coverage">
             <div className="space-y-3 text-sm text-slate-600">
               <div className="rounded-2xl bg-slate-50 p-4">
                 <div className="flex items-center gap-2 font-semibold text-slate-950">
-                  <PackageSearch className="h-4 w-4 text-indigo-600" />
-                  Product visibility
+                  <Store className="h-4 w-4 text-indigo-600" />
+                  Stores
                 </div>
-                <p className="mt-2 leading-6">Find products missing images, prices, categories, or market visibility.</p>
+                <p className="mt-2 leading-6">Reads storeSettings for store health, Google Shopping, and auto sync checks.</p>
               </div>
               <div className="rounded-2xl bg-slate-50 p-4">
                 <div className="flex items-center gap-2 font-semibold text-slate-950">
                   <ReceiptText className="h-4 w-4 text-indigo-600" />
-                  Checkout health
+                  Orders
                 </div>
-                <p className="mt-2 leading-6">Catch setup problems like missing store IDs, unavailable checkout, or failed booking sync.</p>
+                <p className="mt-2 leading-6">Reads integrationOrders for today&apos;s orders, revenue, and failed checkout signals.</p>
               </div>
               <div className="rounded-2xl bg-slate-50 p-4">
                 <div className="flex items-center gap-2 font-semibold text-slate-950">
-                  <CircleAlert className="h-4 w-4 text-indigo-600" />
-                  Integration issues
+                  <PackageSearch className="h-4 w-4 text-indigo-600" />
+                  Catalog
                 </div>
-                <p className="mt-2 leading-6">Show failed webhooks, revoked clients, and outdated access before stores complain.</p>
+                <p className="mt-2 leading-6">Checks products, services, courses, and catalogItems when those collections exist.</p>
               </div>
             </div>
           </SectionCard>
+
+          {Object.keys(dashboard.collectionErrors).length > 0 ? (
+            <SectionCard title="Optional collection notices">
+              <div className="space-y-2 text-xs leading-5 text-slate-500">
+                {Object.entries(dashboard.collectionErrors)
+                  .filter(([key]) => key !== 'storeSettings')
+                  .slice(0, 4)
+                  .map(([key, error]) => (
+                    <p key={key} className="rounded-xl bg-slate-50 p-3">
+                      <span className="font-semibold text-slate-700">{key}:</span> {error}
+                    </p>
+                  ))}
+              </div>
+            </SectionCard>
+          ) : null}
         </div>
       </section>
     </div>
