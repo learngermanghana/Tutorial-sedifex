@@ -13,6 +13,7 @@ const titleMap: Record<string, { title: string; description: string }> = {
   '/admin': { title: 'Overview', description: 'Monitor the health and performance of your Sedifex platform.' },
   '/admin/stores': { title: 'Stores', description: 'Manage tenant stores, plans, status, and storefront operations.' },
   '/admin/products': { title: 'Catalog Review', description: 'Inspect Sedifex product, service, and course readiness.' },
+  '/admin/catalog-repair': { title: 'Catalog Repair', description: 'Rebuild public marketplace listings for each store.' },
   '/admin/orders': { title: 'Orders', description: 'Monitor integration orders, payments, buyers, and source channels.' },
   '/admin/checkout-health': { title: 'Checkout Health', description: 'Diagnose store setup, payment, environment, and webhook issues.' },
   '/admin/deliveries': { title: 'Webhook Deliveries', description: 'Inspect real webhook deliveries, failures, retries, and replay actions.' },
