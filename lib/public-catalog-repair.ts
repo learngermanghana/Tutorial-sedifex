@@ -1,0 +1,329 @@
+import { FieldValue } from 'firebase-admin/firestore';
+import { adminFirestore } from './firebase-admin';
+
+type StoreData = Record<string, unknown>;
+type ProductData = Record<string, unknown>;
+type ListingType = 'product' | 'service' | 'course';
+type ListingCounts = { listings: number; products: number; services: number; courses: number };
+
+export type CatalogRepairResult = {
+  ok: true;
+  storeId: string;
+  deletedListings: number;
+  scannedProducts: number;
+  skippedProducts: number;
+  writtenListings: number;
+  publicCatalogDocCount: ListingCounts;
+  publicCatalogOutOfSyncCount: 0;
+};
+
+function text(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return trimmed || null;
+}
+
+function normalizedType(value: unknown): ListingType {
+  const raw = text(value)?.toLowerCase();
+  if (raw === 'course' || raw === 'programme' || raw === 'program') return 'course';
+  if (raw === 'service' || raw === 'booking' || raw === 'appointment') return 'service';
+  return 'product';
+}
+
+function resolveListingType(data: ProductData): ListingType {
+  return normalizedType(text(data.listingType) ?? text(data.itemType) ?? data.type);
+}
+
+function emptyCounts(): ListingCounts {
+  return { listings: 0, products: 0, services: 0, courses: 0 };
+}
+
+function addCount(counts: ListingCounts, listingType: ListingType) {
+  counts.listings += 1;
+  if (listingType === 'course') counts.courses += 1;
+  else if (listingType === 'service') counts.services += 1;
+  else counts.products += 1;
+}
+
+function numberOrNull(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function boolOrNull(value: unknown): boolean | null {
+  return typeof value === 'boolean' ? value : null;
+}
+
+function timestampOrIso(value: unknown): string | null {
+  try {
+    if (value && typeof value === 'object' && typeof (value as { toDate?: unknown }).toDate === 'function') {
+      const date = (value as { toDate: () => Date }).toDate();
+      return Number.isNaN(date.getTime()) ? null : date.toISOString();
+    }
+    if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value.toISOString();
+    if (typeof value === 'string' && value.trim()) {
+      const date = new Date(value);
+      return Number.isNaN(date.getTime()) ? value.trim() : date.toISOString();
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+function toArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const out: string[] = [];
+  for (const item of value) {
+    const normalized = text(item);
+    if (normalized) out.push(normalized);
+  }
+  return [...new Set(out)];
+}
+
+function isStoreEligible(store: StoreData | undefined): boolean {
+  if (!store) return false;
+  return store.verified === true && store.eligibleForBuy === true && store.buyOptOut !== true && store.status === 'active';
+}
+
+function shouldPublish(data: ProductData, eligibleStore: boolean): boolean {
+  if (data.isMarketplaceVisible === false) return false;
+  if (data.isPublished === false) return false;
+  if (data.isPublished === true) return true;
+  const status = text(data.status)?.toLowerCase();
+  if (status === 'draft') return false;
+  if (status === 'published') return true;
+  return eligibleStore;
+}
+
+function normalizeSlug(value: string): string {
+  return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/-{2,}/g, '-').replace(/^-|-$/g, '');
+}
+
+function categorySlug(value: string): string {
+  return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
+}
+
+function shortId(value: string): string {
+  const cleaned = value.toLowerCase().replace(/[^a-z0-9]/g, '');
+  return (cleaned || '000000').slice(-6);
+}
+
+function resolveSourceProductId(productId: string, data: ProductData): string {
+  return text(data.sourceProductId) ?? productId;
+}
+
+function resolvePublicListingId(productId: string, data: ProductData): { publicListingId: string; sourceProductId: string; slug: string | null } {
+  const sourceProductId = resolveSourceProductId(productId, data);
+  const listingType = resolveListingType(data);
+  const slug = normalizeSlug(text(data.slug) ?? text(data.name) ?? text(data.productName) ?? '');
+
+  if (!sourceProductId.toLowerCase().startsWith('draft-')) {
+    return { publicListingId: sourceProductId, sourceProductId, slug: slug || null };
+  }
+
+  return {
+    publicListingId: [listingType, slug || 'listing', shortId(sourceProductId)].join('-'),
+    sourceProductId,
+    slug: slug || null,
+  };
+}
+
+function normalizeCategoryText(value: unknown): string | null {
+  const raw = text(value)?.replace(/\s+/g, ' ');
+  return raw || null;
+}
+
+function isBlockedFoodCategory(value: unknown): boolean {
+  const raw = normalizeCategoryText(value);
+  if (!raw) return false;
+  const normalized = raw.toLowerCase().replace(/\s*&\s*/g, ' and ').replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim();
+  return ['food', 'drink', 'drinks', 'beverage', 'beverages', 'food and beverage', 'food and beverages'].includes(normalized);
+}
+
+function toTitleCase(value: string): string {
+  return value.trim().toLowerCase().replace(/\b[a-z]/g, character => character.toUpperCase());
+}
+
+function normalizePublicCategory(data: ProductData, listingType: ListingType): string {
+  const explicitCategory = normalizeCategoryText(data.category);
+  const explicitCategoryName = normalizeCategoryText(data.categoryName);
+  const nameAndDescription = [text(data.name), text(data.productName), text(data.description), text(data.serviceKind)]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+
+  const hasBeautySignal = /beauty|makeup|cosmetology|hair|braid|bead|nail|spa|wig|millinery|fashion/.test(nameAndDescription);
+  const hasTrainingSignal = /course|class|training|academy|school|workshop|certificate|certification|learn/.test(nameAndDescription);
+
+  if (listingType === 'course') return hasBeautySignal || hasTrainingSignal ? 'Beauty Training' : 'Education';
+  if (listingType === 'service') return hasBeautySignal || hasTrainingSignal ? (hasTrainingSignal ? 'Beauty Training' : 'Beauty Services') : 'Professional Services';
+  if (explicitCategory && !isBlockedFoodCategory(explicitCategory)) return toTitleCase(explicitCategory);
+  if (explicitCategoryName && !isBlockedFoodCategory(explicitCategoryName)) return toTitleCase(explicitCategoryName);
+  if (hasBeautySignal) return 'Beauty';
+  return 'General Products';
+}
+
+function storeMeta(store: StoreData): Record<string, unknown> {
+  return {
+    storeName: text(store.displayName) ?? text(store.name),
+    storeCity: text(store.city) ?? text(store.town),
+    storePhone: text(store.phone) ?? text(store.phoneNumber) ?? text(store.contactPhone),
+    websiteLink: text(store.websiteLink) ?? text(store.promoWebsiteUrl),
+  };
+}
+
+function publicPayload(productId: string, data: ProductData, store: StoreData, identity: { publicListingId: string; sourceProductId: string; slug: string | null }): Record<string, unknown> {
+  const listingType = resolveListingType(data);
+  const category = normalizePublicCategory(data, listingType);
+  const metadata = data.metadata && typeof data.metadata === 'object' && !Array.isArray(data.metadata) ? data.metadata as Record<string, unknown> : {};
+
+  return {
+    id: identity.publicListingId,
+    publicListingId: identity.publicListingId,
+    sourceProductId: identity.sourceProductId,
+    slug: identity.slug,
+    storeId: text(data.storeId),
+    ...storeMeta(store),
+    name: text(data.name) ?? text(data.productName),
+    description: text(data.description),
+    category,
+    categoryKey: categorySlug(category),
+    categoryName: category,
+    price: numberOrNull(data.price) ?? numberOrNull(data.fullFee),
+    fullFee: numberOrNull(data.fullFee) ?? numberOrNull(data.price),
+    registrationFee: numberOrNull(data.registrationFee),
+    currency: text(data.currency) ?? 'GHS',
+    imageUrl: text(data.imageUrl),
+    imageUrls: toArray(data.imageUrls),
+    imageAlt: text(data.imageAlt),
+    searchTokens: toArray(metadata.searchTokens),
+    rankingScore: numberOrNull(metadata.rankingScore) ?? numberOrNull(data.rankingScore) ?? 0,
+    itemType: listingType,
+    listingType,
+    status: 'published',
+    isVisible: true,
+    isPublished: true,
+    isMarketplaceVisible: true,
+    isWebsiteVisible: data.isWebsiteVisible === true,
+    salesMode: text(data.salesMode),
+    serviceKind: text(data.serviceKind),
+    duration: text(data.duration),
+    branch: text(data.branch) ?? text(data.location),
+    preferredTimes: text(data.preferredTimes) ?? text(data.classTimes),
+    startDate: timestampOrIso(data.startDate),
+    capacity: numberOrNull(data.capacity),
+    requirements: text(data.requirements),
+    starterItems: text(data.starterItems),
+    certificateIncluded: boolOrNull(data.certificateIncluded),
+    Agreement: text(data.Agreement),
+    publishedAt: data.publishedAt ?? data.createdAt ?? data.updatedAt ?? FieldValue.serverTimestamp(),
+    sourceUpdatedAt: data.updatedAt ?? null,
+    updatedAt: FieldValue.serverTimestamp(),
+  };
+}
+
+async function deleteExistingStorePublicListings(storeId: string): Promise<number> {
+  const db = adminFirestore();
+  const snap = await db.collection('publicListings').where('storeId', '==', storeId).get();
+  let batch = db.batch();
+  let writes = 0;
+  let deleted = 0;
+
+  for (const docSnap of snap.docs) {
+    batch.delete(docSnap.ref);
+    writes += 1;
+    deleted += 1;
+    if (writes >= 450) {
+      await batch.commit();
+      batch = db.batch();
+      writes = 0;
+    }
+  }
+
+  if (writes > 0) await batch.commit();
+  return deleted;
+}
+
+export async function repairPublicCatalogForStore(storeId: string): Promise<CatalogRepairResult> {
+  const safeStoreId = storeId.trim();
+  if (!safeStoreId) throw new Error('storeId is required.');
+
+  const db = adminFirestore();
+  const storeRef = db.collection('stores').doc(safeStoreId);
+  const storeSnap = await storeRef.get();
+
+  if (!storeSnap.exists) throw new Error(`Store not found: ${safeStoreId}`);
+
+  const store = (storeSnap.data() ?? {}) as StoreData;
+  const deletedListings = await deleteExistingStorePublicListings(safeStoreId);
+  const counts = emptyCounts();
+
+  if (!isStoreEligible(store)) {
+    await storeRef.set({
+      publicCatalogLastSyncedAt: FieldValue.serverTimestamp(),
+      publicCatalogDocCount: counts,
+      publicCatalogOutOfSyncCount: 0,
+    }, { merge: true });
+    return { ok: true, storeId: safeStoreId, deletedListings, scannedProducts: 0, skippedProducts: 0, writtenListings: 0, publicCatalogDocCount: counts, publicCatalogOutOfSyncCount: 0 };
+  }
+
+  const productsSnap = await db.collection('products').where('storeId', '==', safeStoreId).get();
+  let batch = db.batch();
+  let writes = 0;
+  let scannedProducts = 0;
+  let skippedProducts = 0;
+
+  for (const productDoc of productsSnap.docs) {
+    scannedProducts += 1;
+    const product = (productDoc.data() ?? {}) as ProductData;
+    if (!shouldPublish(product, true)) {
+      skippedProducts += 1;
+      continue;
+    }
+
+    const identity = resolvePublicListingId(productDoc.id, product);
+    const listingType = resolveListingType(product);
+    const category = normalizePublicCategory(product, listingType);
+
+    batch.set(productDoc.ref, {
+      publicListingId: identity.publicListingId,
+      sourceProductId: identity.sourceProductId,
+      slug: identity.slug,
+      listingType,
+      itemType: listingType,
+      category,
+      categoryKey: categorySlug(category),
+      categoryName: category,
+    }, { merge: true });
+    writes += 1;
+
+    batch.set(db.collection('publicListings').doc(identity.publicListingId), publicPayload(productDoc.id, product, store, identity), { merge: true });
+    writes += 1;
+    addCount(counts, listingType);
+
+    if (writes >= 450) {
+      await batch.commit();
+      batch = db.batch();
+      writes = 0;
+    }
+  }
+
+  if (writes > 0) await batch.commit();
+
+  await storeRef.set({
+    publicCatalogLastSyncedAt: FieldValue.serverTimestamp(),
+    publicCatalogDocCount: counts,
+    publicCatalogOutOfSyncCount: 0,
+  }, { merge: true });
+
+  return {
+    ok: true,
+    storeId: safeStoreId,
+    deletedListings,
+    scannedProducts,
+    skippedProducts,
+    writtenListings: counts.listings,
+    publicCatalogDocCount: counts,
+    publicCatalogOutOfSyncCount: 0,
+  };
+}
