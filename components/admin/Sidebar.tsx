@@ -3,12 +3,37 @@
 import Link from 'next/link';
 import type { ComponentType } from 'react';
 import { usePathname } from 'next/navigation';
-import { ChevronRight, House, MessageCircle, Package, ShoppingBag, Store, X } from 'lucide-react';
+import {
+  ChevronRight,
+  CircleAlert,
+  House,
+  MessageCircle,
+  Package,
+  ShoppingBag,
+  Store,
+  Webhook,
+  X,
+} from 'lucide-react';
 
 type Item = { href: string; label: string; icon: ComponentType<{ className?: string }> };
+
 const groups: { label: string; items: Item[] }[] = [
   { label: 'Overview', items: [{ href: '/admin', label: 'Command Center', icon: House }] },
-  { label: 'Commerce', items: [{ href: '/admin/stores', label: 'Stores', icon: Store }, { href: '/admin/products', label: 'Products', icon: Package }, { href: '/admin/orders', label: 'Orders', icon: ShoppingBag }] },
+  {
+    label: 'Commerce',
+    items: [
+      { href: '/admin/stores', label: 'Stores', icon: Store },
+      { href: '/admin/products', label: 'Catalog Review', icon: Package },
+      { href: '/admin/orders', label: 'Orders', icon: ShoppingBag },
+    ],
+  },
+  {
+    label: 'Operations',
+    items: [
+      { href: '/admin/checkout-health', label: 'Checkout Health', icon: CircleAlert },
+      { href: '/admin/deliveries', label: 'Webhook Deliveries', icon: Webhook },
+    ],
+  },
   { label: 'Support', items: [{ href: '/admin/live-chat', label: 'Live Chat', icon: MessageCircle }] },
 ];
 
@@ -32,9 +57,13 @@ export default function Sidebar({ mobileOpen, onMobileClose }: { mobileOpen: boo
             <div className="space-y-1">
               {group.items.map((item) => {
                 const Icon = item.icon;
-                const active = pathname === item.href;
+                const active = pathname === item.href || (item.href !== '/admin' && pathname.startsWith(`${item.href}/`));
                 return (
-                  <Link key={`${group.label}-${item.label}`} href={item.href} className={`flex items-center justify-between rounded-xl px-3 py-2 text-sm transition ${active ? 'bg-slate-800 text-white shadow' : 'text-slate-300 hover:bg-slate-900 hover:text-white'}`}>
+                  <Link
+                    key={`${group.label}-${item.label}`}
+                    href={item.href}
+                    className={`flex items-center justify-between rounded-xl px-3 py-2 text-sm transition ${active ? 'bg-slate-800 text-white shadow' : 'text-slate-300 hover:bg-slate-900 hover:text-white'}`}
+                  >
                     <span className="flex items-center gap-2"><Icon className="h-4 w-4" />{item.label}</span>
                     {active ? <ChevronRight className="h-4 w-4 text-indigo-300" /> : null}
                   </Link>
