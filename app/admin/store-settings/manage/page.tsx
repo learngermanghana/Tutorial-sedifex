@@ -8,8 +8,13 @@ export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
 type StoreSettingsRecord = Record<string, unknown> & { id: string; path: string };
-
-type StoresById = Map<string, Record<string, unknown> & { id: string }>;
+type StoreProfileRecord = Record<string, unknown> & { id: string };
+type StoresById = Map<string, StoreProfileRecord>;
+type StoreSettingsManageData = {
+  error: string | null;
+  settings: StoreSettingsRecord[];
+  storesById: StoresById;
+};
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
@@ -23,8 +28,8 @@ function text(value: unknown, fallback = '') {
 }
 
 function settingName(record: StoreSettingsRecord, storesById: StoresById) {
-  const store = storesById.get(record.id) || {};
-  return text(store.storeName || store.name || store.businessName || record.storeName || record.name || record.businessName, record.id);
+  const store: StoreProfileRecord = storesById.get(record.id) ?? { id: record.id };
+  return text(store.storeName || store.name || store.businessName || store.displayName || record.storeName || record.name || record.businessName, record.id);
 }
 
 function googleShopping(record: StoreSettingsRecord) {
@@ -72,9 +77,9 @@ function hasBookingSync(record: StoreSettingsRecord) {
   return record.bookingSyncEnabled === true || record.appScriptBookingSyncEnabled === true || sync.enabled === true || Boolean(text(sync.webAppUrl) || text(sync.appsScriptUrl) || text(sync.url));
 }
 
-async function loadSettings() {
+async function loadSettings(): Promise<StoreSettingsManageData> {
   const env = getFirebaseEnvStatus();
-  if (!env.ready) return { error: 'Firebase environment variables are not ready.', settings: [] as StoreSettingsRecord[], storesById: new Map() as StoresById };
+  if (!env.ready) return { error: 'Firebase environment variables are not ready.', settings: [], storesById: new Map<string, StoreProfileRecord>() };
 
   const db = adminFirestore();
   const [settingsSnap, storesSnap] = await Promise.all([
@@ -82,8 +87,8 @@ async function loadSettings() {
     db.collection('stores').limit(400).get(),
   ]);
 
-  const storesById: StoresById = new Map(storesSnap.docs.map((doc) => [doc.id, { ...(doc.data() as Record<string, unknown>), id: doc.id }]));
-  const settings = settingsSnap.docs.map((doc) => ({ ...(doc.data() as Record<string, unknown>), id: doc.id, path: doc.ref.path }));
+  const storesById: StoresById = new Map(storesSnap.docs.map((doc) => [doc.id, { ...(doc.data() as Record<string, unknown>), id: doc.id } as StoreProfileRecord]));
+  const settings: StoreSettingsRecord[] = settingsSnap.docs.map((doc) => ({ ...(doc.data() as Record<string, unknown>), id: doc.id, path: doc.ref.path }));
   return { error: null, settings, storesById };
 }
 
