@@ -12,6 +12,7 @@ import {
   MessageCircle,
   Package,
   PackageCheck,
+  Settings,
   ShoppingBag,
   Store,
   Webhook,
@@ -26,6 +27,7 @@ const groups: { label: string; items: Item[] }[] = [
     label: 'Commerce',
     items: [
       { href: '/admin/stores', label: 'Stores', icon: Store },
+      { href: '/admin/store-settings', label: 'Store Settings', icon: Settings },
       { href: '/admin/products', label: 'Catalog Review', icon: Package },
       { href: '/admin/google-sync', label: 'Google Sync', icon: PackageCheck },
       { href: '/admin/catalog-repair', label: 'Catalog Repair', icon: Hammer },
