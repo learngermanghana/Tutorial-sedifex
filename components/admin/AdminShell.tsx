@@ -31,12 +31,11 @@ export default function AdminShell({ children }: { children: ReactNode }) {
 function ShellFrame({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const pageMeta = useMemo(() => titleMap[pathname] ?? { title: 'Admin', description: 'Sedifex administration portal.' }, [pathname]);
 
   if (pathname === '/admin/login') {
     return <>{children}</>;
   }
-
-  const pageMeta = useMemo(() => titleMap[pathname] ?? { title: 'Admin', description: 'Sedifex administration portal.' }, [pathname]);
 
   return (
     <div className="min-h-screen bg-slate-100">
