@@ -194,7 +194,7 @@ function itemStatusTone(item: CatalogItem) {
 async function readCollection<T extends Record<string, unknown>>(collectionPath: string): Promise<CollectionRead<T>> {
   try {
     const result = await listFirestoreDocuments(collectionPath, 100);
-    return { ok: true, error: null, documents: result.documents as T[] };
+    return { ok: true, error: null, documents: result.documents as unknown as T[] };
   } catch (error) {
     return {
       ok: false,
