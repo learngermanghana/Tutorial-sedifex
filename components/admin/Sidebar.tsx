@@ -8,6 +8,7 @@ import {
   CircleAlert,
   Hammer,
   House,
+  Mail,
   MessageCircle,
   Package,
   ShoppingBag,
@@ -32,6 +33,7 @@ const groups: { label: string; items: Item[] }[] = [
   {
     label: 'Operations',
     items: [
+      { href: '/admin/marketing', label: 'Marketing Center', icon: Mail },
       { href: '/admin/checkout-health', label: 'Checkout Health', icon: CircleAlert },
       { href: '/admin/deliveries', label: 'Webhook Deliveries', icon: Webhook },
     ],
