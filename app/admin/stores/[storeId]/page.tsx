@@ -451,7 +451,7 @@ export default async function StoreDetailPage({ params }: { params: Params }) {
   const integrationBaseUrl = nestedText(settings || {}, ['googleShopping', 'catalogSync', 'integrationBaseUrl'], '');
   const googleUpdateAction = updateGoogleShoppingSettings.bind(null, decodedStoreId);
   const settingsUpdateAction = updateStoreSettings.bind(null, decodedStoreId);
-  const catalogIssuesCount = result.catalogItems.reduce((sum, item) => sum + catalogIssues(item).length, 0);
+  const catalogIssuesCount = result.catalogItems.reduce<number>((sum, item) => sum + catalogIssues(item).length, 0);
   const recentOrders = [...result.orders].sort((a, b) => (recordTime(b) || 0) - (recordTime(a) || 0)).slice(0, 5);
 
   return (
