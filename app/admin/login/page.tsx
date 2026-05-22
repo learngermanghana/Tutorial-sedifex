@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { FormEvent, useState } from 'react';
+import { FormEvent, useEffect, useState } from 'react';
 
 type LoginResponse = {
   ok?: boolean;
@@ -17,24 +17,43 @@ const accessNotes = [
   'Fast, image-free login screen',
 ];
 
+const REMEMBERED_EMAIL_KEY = 'sedifex_admin_remembered_email';
+const ONE_DAY_SECONDS = 60 * 60 * 24;
+const THIRTY_DAYS_SECONDS = ONE_DAY_SECONDS * 30;
+
+function cookieMaxAge(rememberMe: boolean) {
+  return rememberMe ? THIRTY_DAYS_SECONDS : ONE_DAY_SECONDS;
+}
+
 export default function AdminLoginPage() {
   const router = useRouter();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [rememberMe, setRememberMe] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    const rememberedEmail = window.localStorage.getItem(REMEMBERED_EMAIL_KEY);
+    if (rememberedEmail) {
+      setEmail(rememberedEmail);
+      setRememberMe(true);
+    }
+  }, []);
 
   async function login(e: FormEvent) {
     e.preventDefault();
     setLoading(true);
     setError(null);
 
+    const trimmedEmail = email.trim();
+
     try {
       const res = await fetch('/api/admin/login', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ email: email.trim(), password }),
+        body: JSON.stringify({ email: trimmedEmail, password }),
       });
 
       const data = (await res.json().catch(() => ({}))) as LoginResponse;
@@ -44,8 +63,15 @@ export default function AdminLoginPage() {
         return;
       }
 
-      document.cookie = `sedifex_admin_role=${data.role}; path=/; max-age=86400; SameSite=Lax`;
-      document.cookie = `sedifex_admin_scope=${data.scope}; path=/; max-age=86400; SameSite=Lax`;
+      if (rememberMe) {
+        window.localStorage.setItem(REMEMBERED_EMAIL_KEY, trimmedEmail);
+      } else {
+        window.localStorage.removeItem(REMEMBERED_EMAIL_KEY);
+      }
+
+      const maxAge = cookieMaxAge(rememberMe);
+      document.cookie = `sedifex_admin_role=${encodeURIComponent(data.role)}; path=/; max-age=${maxAge}; SameSite=Lax`;
+      document.cookie = `sedifex_admin_scope=${encodeURIComponent(data.scope)}; path=/; max-age=${maxAge}; SameSite=Lax`;
       router.push('/admin');
     } catch {
       setError('Unable to reach the login service. Please try again.');
@@ -61,7 +87,7 @@ export default function AdminLoginPage() {
 
       <section className="relative grid w-full max-w-5xl overflow-hidden rounded-3xl border border-white/10 bg-white/[0.04] shadow-2xl backdrop-blur lg:grid-cols-[0.95fr_1.05fr]">
         <aside className="hidden border-r border-white/10 bg-slate-900/70 p-8 lg:block">
-          <Link href="/" className="inline-flex items-center gap-3">
+          <Link href="/admin/login" className="inline-flex items-center gap-3">
             <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-indigo-500 text-lg font-black shadow-lg shadow-indigo-500/20">
               S
             </span>
@@ -97,7 +123,7 @@ export default function AdminLoginPage() {
 
         <div className="p-5 sm:p-8 lg:p-10">
           <div className="mb-8 flex items-center justify-between gap-4 lg:hidden">
-            <Link href="/" className="flex items-center gap-3">
+            <Link href="/admin/login" className="flex items-center gap-3">
               <span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-indigo-500 text-base font-black">
                 S
               </span>
@@ -160,6 +186,22 @@ export default function AdminLoginPage() {
                   placeholder="Enter your password"
                 />
               </div>
+
+              <label className="flex cursor-pointer items-start gap-3 rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-slate-300 transition hover:bg-white/[0.06]" htmlFor="rememberMe">
+                <input
+                  id="rememberMe"
+                  type="checkbox"
+                  checked={rememberMe}
+                  onChange={(e) => setRememberMe(e.target.checked)}
+                  className="mt-0.5 h-4 w-4 rounded border-white/20 bg-slate-900 text-indigo-500 accent-indigo-500"
+                />
+                <span>
+                  <span className="block font-semibold text-slate-100">Remember me</span>
+                  <span className="mt-1 block text-xs leading-5 text-slate-500">
+                    Keep this device signed in for 30 days and remember your email address.
+                  </span>
+                </span>
+              </label>
 
               {error ? (
                 <div className="rounded-2xl border border-red-400/20 bg-red-400/10 px-4 py-3 text-sm text-red-100">
