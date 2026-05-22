@@ -15,6 +15,7 @@ import {
   Settings,
   ShoppingBag,
   Store,
+  Users,
   Webhook,
   X,
 } from 'lucide-react';
@@ -27,6 +28,7 @@ const groups: { label: string; items: Item[] }[] = [
     label: 'Commerce',
     items: [
       { href: '/admin/stores', label: 'Stores', icon: Store },
+      { href: '/admin/customers', label: 'Customers', icon: Users },
       { href: '/admin/products', label: 'Catalog Review', icon: Package },
       { href: '/admin/google-sync', label: 'Google Sync', icon: PackageCheck },
       { href: '/admin/catalog-sync', label: 'Catalog Sync', icon: Hammer },
