@@ -1,5 +1,7 @@
+import { revalidatePath } from 'next/cache';
 import Link from 'next/link';
 import { ArrowUpRight, Mail, MapPin, Phone, Search, Store, UserRound, Users } from 'lucide-react';
+import DeleteCustomerForm from '../../../components/admin/DeleteCustomerForm';
 import { SectionCard, StatCard, StatusBadge } from '../../../components/admin/ui';
 import { adminFirestore, getFirebaseEnvStatus } from '../../../lib/firebase-admin';
 
@@ -33,6 +35,38 @@ function text(value: unknown, fallback = '') {
   if (typeof value === 'number') return String(value);
   if (typeof value === 'boolean') return value ? 'Yes' : 'No';
   return fallback;
+}
+
+function isSafeCustomerPath(path: string) {
+  return /^customers\/[^/]+$/.test(path) || /^stores\/[^/]+\/customers\/[^/]+$/.test(path);
+}
+
+async function deleteCustomer(formData: FormData) {
+  'use server';
+
+  const customerPath = text(formData.get('customerPath'));
+  const confirmDelete = text(formData.get('confirmDelete'));
+  if (confirmDelete !== 'DELETE_CUSTOMER') return;
+  if (!isSafeCustomerPath(customerPath)) return;
+
+  const db = adminFirestore();
+  const snapshot = await db.doc(customerPath).get();
+  const customerId = snapshot.id;
+  const customerData = snapshot.exists ? snapshot.data() || {} : {};
+
+  await db.doc(customerPath).delete();
+  await db.collection('adminAuditLogs').add({
+    action: 'customer_delete',
+    customerPath,
+    customerId,
+    customerName: text(customerData.name || customerData.customerName || customerData.fullName || customerData.displayName),
+    customerEmail: text(customerData.email || customerData.customerEmail),
+    actor: 'sedifexadmin',
+    createdAt: new Date().toISOString(),
+  });
+
+  revalidatePath('/admin/customers');
+  revalidatePath(`/admin/customers/${customerId}`);
 }
 
 function nestedText(record: RawRecord | undefined, path: string[], fallback = '') {
@@ -92,12 +126,6 @@ function timestampToMillis(value: unknown) {
     return seconds * 1000;
   }
   return 0;
-}
-
-function formatDate(value: unknown) {
-  const millis = timestampToMillis(value);
-  if (!millis) return 'Not set';
-  return new Intl.DateTimeFormat('en', { month: 'short', day: 'numeric', year: 'numeric' }).format(new Date(millis));
 }
 
 function orderAmount(order: OrderRecord) {
@@ -265,8 +293,8 @@ export default async function CustomersPage({ searchParams }: { searchParams: Se
           <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center text-sm leading-6 text-slate-600">No customers matched this search.</div>
         ) : (
           <div className="overflow-hidden rounded-2xl border border-slate-200">
-            <div className="hidden grid-cols-[1.1fr_1fr_1fr_0.8fr_auto] gap-4 border-b border-slate-200 bg-slate-50 px-4 py-3 text-xs font-bold uppercase tracking-wide text-slate-500 xl:grid">
-              <span>Customer</span><span>Contact</span><span>Store</span><span>Orders</span><span>Open</span>
+            <div className="hidden grid-cols-[1.1fr_1fr_1fr_0.8fr_150px] gap-4 border-b border-slate-200 bg-slate-50 px-4 py-3 text-xs font-bold uppercase tracking-wide text-slate-500 xl:grid">
+              <span>Customer</span><span>Contact</span><span>Store</span><span>Orders</span><span>Actions</span>
             </div>
             <div className="divide-y divide-slate-100">
               {filtered.slice(0, 200).map((customer) => {
@@ -275,14 +303,15 @@ export default async function CustomersPage({ searchParams }: { searchParams: Se
                 const orders = customerOrders(customer, data.orders);
                 const spent = orders.reduce((sum, order) => sum + orderAmount(order), 0);
                 const detailHref = `/admin/customers/${encodeURIComponent(customer.id)}${storeId ? `?storeId=${encodeURIComponent(storeId)}` : ''}`;
+                const name = customerName(customer);
 
                 return (
-                  <div key={customer.path} className="grid gap-4 px-4 py-4 text-sm xl:grid-cols-[1.1fr_1fr_1fr_0.8fr_auto] xl:items-center">
+                  <div key={customer.path} className="grid gap-4 px-4 py-4 text-sm xl:grid-cols-[1.1fr_1fr_1fr_0.8fr_150px] xl:items-center">
                     <div className="min-w-0">
                       <div className="flex items-center gap-3">
                         <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-indigo-50 text-indigo-600"><UserRound className="h-4 w-4" /></span>
                         <div className="min-w-0">
-                          <p className="truncate font-semibold text-slate-950">{customerName(customer)}</p>
+                          <p className="truncate font-semibold text-slate-950">{name}</p>
                           <p className="truncate text-xs text-slate-500">{customer.id}</p>
                         </div>
                       </div>
@@ -301,9 +330,12 @@ export default async function CustomersPage({ searchParams }: { searchParams: Se
                       <StatusBadge tone={spent > 0 ? 'green' : 'slate'}>GHS {spent.toFixed(2)}</StatusBadge>
                       <StatusBadge tone={customer.source === 'root' ? 'blue' : 'slate'}>{customer.source === 'root' ? '/customers' : 'store customers'}</StatusBadge>
                     </div>
-                    <Link href={detailHref} className="inline-flex items-center justify-center gap-1 rounded-xl bg-indigo-600 px-3 py-2 text-xs font-bold text-white hover:bg-indigo-500">
-                      Open <ArrowUpRight className="h-3.5 w-3.5" />
-                    </Link>
+                    <div className="flex flex-wrap gap-2 xl:justify-end">
+                      <Link href={detailHref} className="inline-flex items-center justify-center gap-1 rounded-xl bg-indigo-600 px-3 py-2 text-xs font-bold text-white hover:bg-indigo-500">
+                        Open <ArrowUpRight className="h-3.5 w-3.5" />
+                      </Link>
+                      <DeleteCustomerForm action={deleteCustomer} customerPath={customer.path} customerName={name} compact />
+                    </div>
                   </div>
                 );
               })}
