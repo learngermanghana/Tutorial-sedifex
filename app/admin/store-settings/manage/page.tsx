@@ -1,6 +1,6 @@
 import { revalidatePath } from 'next/cache';
 import Link from 'next/link';
-import { CheckCircle2, ExternalLink, KeyRound, PlugZap, RotateCcw, Settings, ToggleLeft, ToggleRight } from 'lucide-react';
+import { CheckCircle2, Edit3, Eye, KeyRound, PlugZap, RotateCcw, Settings, Store, ToggleLeft, ToggleRight } from 'lucide-react';
 import { SectionCard, StatCard, StatusBadge } from '../../../../components/admin/ui';
 import { adminFirestore, getFirebaseEnvStatus } from '../../../../lib/firebase-admin';
 
@@ -29,7 +29,17 @@ function text(value: unknown, fallback = '') {
 
 function settingName(record: StoreSettingsRecord, storesById: StoresById) {
   const store: StoreProfileRecord = storesById.get(record.id) ?? { id: record.id };
-  return text(store.storeName || store.name || store.businessName || store.displayName || record.storeName || record.name || record.businessName, record.id);
+  return text(store.storeName || store.name || store.businessName || store.displayName || record.storeName || record.name || record.businessName || record.displayName, record.id);
+}
+
+function storeEmail(record: StoreSettingsRecord, storesById: StoresById) {
+  const store: StoreProfileRecord = storesById.get(record.id) ?? { id: record.id };
+  return text(store.publicEmail || store.email || store.ownerEmail || record.publicEmail || record.email || record.ownerEmail, 'No email');
+}
+
+function storePhone(record: StoreSettingsRecord, storesById: StoresById) {
+  const store: StoreProfileRecord = storesById.get(record.id) ?? { id: record.id };
+  return text(store.publicPhone || store.phone || store.phoneNumber || store.contactPhone || record.publicPhone || record.phone || record.contactPhone, 'No phone');
 }
 
 function googleShopping(record: StoreSettingsRecord) {
@@ -137,11 +147,18 @@ async function updateStoreSettings(formData: FormData) {
     const store = asRecord(storeSnap.data());
     await settingsRef.set({
       storeName: text(store.storeName || store.name || store.businessName || store.displayName),
-      name: text(store.name || store.storeName || store.businessName),
-      businessName: text(store.businessName || store.storeName || store.name),
-      phone: text(store.phone || store.storePhone || store.whatsappNumber),
-      storePhone: text(store.storePhone || store.phone || store.whatsappNumber),
-      email: text(store.email || store.storeEmail || store.contactEmail),
+      name: text(store.name || store.storeName || store.businessName || store.displayName),
+      displayName: text(store.displayName || store.storeName || store.name || store.businessName),
+      businessName: text(store.businessName || store.storeName || store.name || store.displayName),
+      phone: text(store.phone || store.phoneNumber || store.storePhone || store.contactPhone || store.whatsappNumber),
+      storePhone: text(store.storePhone || store.phone || store.phoneNumber || store.contactPhone || store.whatsappNumber),
+      contactPhone: text(store.contactPhone || store.phone || store.phoneNumber || store.storePhone || store.whatsappNumber),
+      email: text(store.email || store.publicEmail || store.ownerEmail || store.storeEmail || store.contactEmail),
+      publicEmail: text(store.publicEmail || store.email || store.ownerEmail || store.storeEmail || store.contactEmail),
+      addressLine1: text(store.addressLine1 || store.address || store.businessAddress),
+      city: text(store.city || store.storeCity),
+      country: text(store.country || store.storeCountry),
+      websiteUrl: text(store.websiteUrl || store.websiteLink || store.storeWebsiteUrl),
       updatedAt: now,
       adminUpdatedAt: now,
       adminUpdatedFrom: 'store-settings-manage',
@@ -161,6 +178,9 @@ async function updateStoreSettings(formData: FormData) {
   }
 
   await db.collection('adminAuditLogs').add({ action: `store_settings_${action}`, storeId, actor: 'sedifexadmin', createdAt: now });
+  revalidatePath('/admin/stores');
+  revalidatePath(`/admin/stores/${storeId}`);
+  revalidatePath(`/admin/stores/${storeId}/edit`);
   revalidatePath('/admin/store-settings');
   revalidatePath('/admin/store-settings/manage');
 }
@@ -180,13 +200,15 @@ export default async function ManageStoreSettingsPage() {
         <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div>
             <div className="inline-flex items-center gap-2 rounded-full border border-indigo-300/20 bg-indigo-400/10 px-3 py-1 text-xs font-semibold text-indigo-100">
-              <Settings className="h-4 w-4" /> Editable Store Settings
+              <Settings className="h-4 w-4" /> Advanced Store Settings
             </div>
-            <h2 className="mt-5 max-w-4xl text-3xl font-bold tracking-tight sm:text-4xl">Manage /storeSettings without opening Firestore.</h2>
-            <p className="mt-4 max-w-3xl text-sm leading-7 text-slate-300">Turn Google auto-sync on/off, mark integration API config ready, copy basic store profile values into storeSettings, and disable booking sync when needed.</p>
+            <h2 className="mt-5 max-w-4xl text-3xl font-bold tracking-tight sm:text-4xl">Editable technical settings for each store.</h2>
+            <p className="mt-4 max-w-3xl text-sm leading-7 text-slate-300">
+              Use Stores for daily profile editing. Use this advanced page for technical actions: auto-sync, integration API readiness, copying profile fields into /storeSettings, and disabling booking sync.
+            </p>
           </div>
-          <Link href="/admin/store-settings" className="inline-flex items-center justify-center gap-2 rounded-2xl bg-white px-4 py-3 text-sm font-bold text-slate-950 hover:bg-slate-100">
-            Back to Store Settings <ExternalLink className="h-4 w-4" />
+          <Link href="/admin/stores" className="inline-flex items-center justify-center gap-2 rounded-2xl bg-white px-4 py-3 text-sm font-bold text-slate-950 hover:bg-slate-100">
+            Open Stores <Store className="h-4 w-4" />
           </Link>
         </div>
       </section>
@@ -200,13 +222,13 @@ export default async function ManageStoreSettingsPage() {
         <StatCard label="API ready" value={String(apiReady)} delta="Integration API fields present" />
       </section>
 
-      <SectionCard title="Editable store settings actions">
+      <SectionCard title="Editable advanced actions">
         <div className="divide-y divide-slate-100">
           {settings.map((record) => {
             const api = integrationApi(record);
             const sync = bookingSync(record);
             return (
-              <div key={record.id} className="grid gap-4 py-5 lg:grid-cols-[1fr_280px_420px] lg:items-center">
+              <div key={record.id} className="grid gap-4 py-5 xl:grid-cols-[1fr_280px_520px] xl:items-center">
                 <div>
                   <div className="flex flex-wrap items-center gap-2">
                     <h3 className="font-semibold text-slate-950">{settingName(record, data.storesById)}</h3>
@@ -214,13 +236,22 @@ export default async function ManageStoreSettingsPage() {
                     <StatusBadge tone={autoSyncEnabled(record) ? 'green' : 'yellow'}>{autoSyncEnabled(record) ? 'Auto-sync on' : 'Auto-sync off'}</StatusBadge>
                   </div>
                   <p className="mt-1 break-all text-xs text-slate-500">{record.path}</p>
+                  <p className="mt-2 text-xs text-slate-500">{storeEmail(record, data.storesById)} · {storePhone(record, data.storesById)}</p>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <Link href={`/admin/stores/${encodeURIComponent(record.id)}`} className="inline-flex items-center gap-1 rounded-xl border border-slate-200 px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50">
+                      <Eye className="h-3.5 w-3.5" /> View store
+                    </Link>
+                    <Link href={`/admin/stores/${encodeURIComponent(record.id)}/edit`} className="inline-flex items-center gap-1 rounded-xl bg-indigo-600 px-3 py-2 text-xs font-bold text-white hover:bg-indigo-500">
+                      <Edit3 className="h-3.5 w-3.5" /> Edit profile
+                    </Link>
+                  </div>
                 </div>
                 <div className="text-sm text-slate-600">
                   <p><KeyRound className="mr-1 inline h-3.5 w-3.5" /><strong>Key:</strong> {text(record.latestIntegrationApiKeyPreview || api.keyPreview, 'No key preview')}</p>
                   <p className="break-all"><strong>Base:</strong> {text(api.baseUrl, '—')}</p>
                   <p className="break-all"><PlugZap className="mr-1 inline h-3.5 w-3.5" /><strong>Booking:</strong> {text(sync.webAppUrl || sync.appsScriptUrl || sync.url, '—')}</p>
                 </div>
-                <div className="flex flex-wrap gap-2 lg:justify-end">
+                <div className="flex flex-wrap gap-2 xl:justify-end">
                   <form action={updateStoreSettings}><input type="hidden" name="storeId" value={record.id} /><button name="action" value="auto-sync-on" className="inline-flex items-center gap-2 rounded-2xl bg-emerald-600 px-3 py-2 text-xs font-bold text-white hover:bg-emerald-500"><ToggleRight className="h-4 w-4" /> Auto-sync on</button></form>
                   <form action={updateStoreSettings}><input type="hidden" name="storeId" value={record.id} /><button name="action" value="auto-sync-off" className="inline-flex items-center gap-2 rounded-2xl bg-slate-700 px-3 py-2 text-xs font-bold text-white hover:bg-slate-600"><ToggleLeft className="h-4 w-4" /> Auto-sync off</button></form>
                   <form action={updateStoreSettings}><input type="hidden" name="storeId" value={record.id} /><button name="action" value="mark-api-ready" className="inline-flex items-center gap-2 rounded-2xl bg-indigo-600 px-3 py-2 text-xs font-bold text-white hover:bg-indigo-500"><CheckCircle2 className="h-4 w-4" /> Mark API ready</button></form>
