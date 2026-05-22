@@ -1,5 +1,8 @@
+import { revalidatePath } from 'next/cache';
+import { redirect } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowLeft, Mail, MapPin, Phone, ShoppingBag, Store, UserRound } from 'lucide-react';
+import { ArrowLeft, Mail, Phone, ShoppingBag, Store, UserRound } from 'lucide-react';
+import DeleteCustomerForm from '../../../../components/admin/DeleteCustomerForm';
 import { SectionCard, StatCard, StatusBadge } from '../../../../components/admin/ui';
 import { adminFirestore, getFirebaseEnvStatus } from '../../../../lib/firebase-admin';
 
@@ -29,6 +32,39 @@ function text(value: unknown, fallback = '') {
   if (typeof value === 'number') return String(value);
   if (typeof value === 'boolean') return value ? 'Yes' : 'No';
   return fallback;
+}
+
+function isSafeCustomerPath(path: string) {
+  return /^customers\/[^/]+$/.test(path) || /^stores\/[^/]+\/customers\/[^/]+$/.test(path);
+}
+
+async function deleteCustomer(formData: FormData) {
+  'use server';
+
+  const customerPath = text(formData.get('customerPath'));
+  const confirmDelete = text(formData.get('confirmDelete'));
+  if (confirmDelete !== 'DELETE_CUSTOMER') return;
+  if (!isSafeCustomerPath(customerPath)) return;
+
+  const db = adminFirestore();
+  const snapshot = await db.doc(customerPath).get();
+  const customerId = snapshot.id;
+  const customerData = snapshot.exists ? snapshot.data() || {} : {};
+
+  await db.doc(customerPath).delete();
+  await db.collection('adminAuditLogs').add({
+    action: 'customer_delete',
+    customerPath,
+    customerId,
+    customerName: text(customerData.name || customerData.customerName || customerData.fullName || customerData.displayName),
+    customerEmail: text(customerData.email || customerData.customerEmail),
+    actor: 'sedifexadmin',
+    createdAt: new Date().toISOString(),
+  });
+
+  revalidatePath('/admin/customers');
+  revalidatePath(`/admin/customers/${customerId}`);
+  redirect('/admin/customers');
 }
 
 function nestedText(record: RawRecord | undefined, path: string[], fallback = '') {
@@ -230,6 +266,7 @@ export default async function CustomerDetailPage({ params, searchParams }: { par
   const spent = data.orders.reduce((sum, order) => sum + orderAmount(order), 0);
   const lastOrder = data.orders[0];
   const storeId = customerStoreId(customer);
+  const name = customerName(customer);
 
   if (!customer) {
     return (
@@ -242,7 +279,10 @@ export default async function CustomerDetailPage({ params, searchParams }: { par
 
   return (
     <div className="space-y-6">
-      <Link href="/admin/customers" className="inline-flex items-center gap-2 text-sm font-semibold text-indigo-600 hover:text-indigo-500"><ArrowLeft className="h-4 w-4" /> Back to customers</Link>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <Link href="/admin/customers" className="inline-flex items-center gap-2 text-sm font-semibold text-indigo-600 hover:text-indigo-500"><ArrowLeft className="h-4 w-4" /> Back to customers</Link>
+        <DeleteCustomerForm action={deleteCustomer} customerPath={customer.path} customerName={name} />
+      </div>
 
       <section className="rounded-3xl border border-slate-200 bg-slate-950 p-6 text-white shadow-sm sm:p-8">
         <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
@@ -250,7 +290,7 @@ export default async function CustomerDetailPage({ params, searchParams }: { par
             <div className="inline-flex items-center gap-2 rounded-full border border-indigo-300/20 bg-indigo-400/10 px-3 py-1 text-xs font-semibold text-indigo-100">
               <UserRound className="h-4 w-4" /> Customer profile
             </div>
-            <h2 className="mt-5 text-3xl font-bold tracking-tight sm:text-4xl">{customerName(customer)}</h2>
+            <h2 className="mt-5 text-3xl font-bold tracking-tight sm:text-4xl">{name}</h2>
             <p className="mt-2 break-all text-sm leading-7 text-slate-300">Customer ID: {customer.id}</p>
             <p className="mt-1 break-all text-sm leading-7 text-slate-300">Path: {customer.path}</p>
           </div>
@@ -273,7 +313,7 @@ export default async function CustomerDetailPage({ params, searchParams }: { par
         <div className="space-y-6">
           <SectionCard title="Customer information">
             <div className="grid gap-3">
-              <DetailRow label="Name" value={customerName(customer)} />
+              <DetailRow label="Name" value={name} />
               <DetailRow label="Email" value={customerEmail(customer) || 'Not set'} />
               <DetailRow label="Phone" value={customerPhone(customer) || 'Not set'} />
               <DetailRow label="Address" value={customerAddress(customer)} />
@@ -325,6 +365,16 @@ export default async function CustomerDetailPage({ params, searchParams }: { par
               <DetailRow label="Store ID" value={storeId || 'Not set'} />
               <DetailRow label="Location" value={storeLocation(data.store) || 'Not set'} />
               {storeId ? <Link href={`/admin/stores/${encodeURIComponent(storeId)}`} className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-slate-950 px-4 py-3 text-sm font-bold text-white hover:bg-slate-800"><Store className="h-4 w-4" /> Open store</Link> : null}
+            </div>
+          </SectionCard>
+
+          <SectionCard title="Danger zone">
+            <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">
+              <p className="font-semibold">Delete this fake or wrong customer record.</p>
+              <p className="mt-1 leading-6">This only deletes the customer document. It does not delete orders or the linked store.</p>
+              <div className="mt-4">
+                <DeleteCustomerForm action={deleteCustomer} customerPath={customer.path} customerName={name} />
+              </div>
             </div>
           </SectionCard>
 
