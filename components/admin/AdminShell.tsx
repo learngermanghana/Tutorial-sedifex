@@ -19,6 +19,7 @@ const titleMap: Record<string, { title: string; description: string }> = {
   '/admin/checkout-health': { title: 'Checkout Health', description: 'Diagnose store setup, payment, environment, and webhook issues.' },
   '/admin/deliveries': { title: 'Webhook Deliveries', description: 'Inspect real webhook deliveries, failures, retries, and replay actions.' },
   '/admin/live-chat': { title: 'Live Chat', description: 'Reply to Sedifex Market visitor messages and manage support conversations.' },
+  '/admin/store-settings/manage': { title: 'Advanced Store Settings', description: 'Edit technical store settings, integration API, auto-sync, and booking sync safely.' },
 };
 
 export default function AdminShell({ children }: { children: ReactNode }) {
@@ -32,7 +33,15 @@ export default function AdminShell({ children }: { children: ReactNode }) {
 function ShellFrame({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
-  const pageMeta = useMemo(() => titleMap[pathname] ?? { title: 'Admin', description: 'Sedifex administration portal.' }, [pathname]);
+  const pageMeta = useMemo(() => {
+    if (pathname?.startsWith('/admin/stores/') && pathname.endsWith('/edit')) {
+      return { title: 'Edit Store', description: 'Update public store profile, marketplace status, and common store fields.' };
+    }
+    if (pathname?.startsWith('/admin/stores/')) {
+      return { title: 'Store Details', description: 'Review rich store profile, catalog, billing, and integration status.' };
+    }
+    return titleMap[pathname] ?? { title: 'Admin', description: 'Sedifex administration portal.' };
+  }, [pathname]);
 
   if (pathname === '/admin/login') {
     return <>{children}</>;
