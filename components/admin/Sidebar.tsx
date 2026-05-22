@@ -27,7 +27,6 @@ const groups: { label: string; items: Item[] }[] = [
     label: 'Commerce',
     items: [
       { href: '/admin/stores', label: 'Stores', icon: Store },
-      { href: '/admin/store-settings', label: 'Store Settings', icon: Settings },
       { href: '/admin/products', label: 'Catalog Review', icon: Package },
       { href: '/admin/google-sync', label: 'Google Sync', icon: PackageCheck },
       { href: '/admin/catalog-sync', label: 'Catalog Sync', icon: Hammer },
@@ -40,6 +39,7 @@ const groups: { label: string; items: Item[] }[] = [
       { href: '/admin/marketing', label: 'Marketing Center', icon: Mail },
       { href: '/admin/checkout-health', label: 'Checkout Health', icon: CircleAlert },
       { href: '/admin/deliveries', label: 'Webhook Deliveries', icon: Webhook },
+      { href: '/admin/store-settings/manage', label: 'Advanced Settings', icon: Settings },
     ],
   },
   { label: 'Support', items: [{ href: '/admin/live-chat', label: 'Live Chat', icon: MessageCircle }] },
