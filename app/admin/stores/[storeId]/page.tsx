@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { ArrowLeft, Database, Hammer, PackageSearch, ShoppingBag, Store } from 'lucide-react';
+import { ArrowLeft, Database, Edit3, ExternalLink, Hammer, PackageSearch, ReceiptText, ShoppingBag, Store } from 'lucide-react';
 import { SectionCard, StatusBadge } from '../../../../components/admin/ui';
 import { getFirebaseEnvStatus, getFirestoreDocument, listFirestoreDocuments } from '../../../../lib/firebase-admin';
 
@@ -63,8 +63,13 @@ function countMap(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
 
+function mergedIdentity(profile: DashboardRecord | null, settings: DashboardRecord | null) {
+  return { ...(settings || {}), ...(profile || {}) } as DashboardRecord;
+}
+
 function storeName(profile: DashboardRecord | null, settings: DashboardRecord | null, fallback: string) {
-  return text(profile, ['displayName', 'name', 'storeName', 'businessName'], text(settings, ['displayName', 'name', 'storeName', 'businessName'], fallback));
+  const identity = mergedIdentity(profile, settings);
+  return text(identity, ['displayName', 'storeName', 'name', 'businessName', 'merchantName'], fallback);
 }
 
 function isStoreCatalogItem(item: DashboardRecord, storeId: string) {
@@ -86,8 +91,8 @@ function missingCatalogFields(item: DashboardRecord) {
   return missing.length;
 }
 
-function recordTime(record: DashboardRecord) {
-  const value = record.updatedAt ?? record.updateTime ?? record.createdAt ?? record.createTime;
+function timestampToMillis(value: unknown) {
+  if (!value) return 0;
   if (typeof value === 'string') {
     const parsed = Date.parse(value);
     return Number.isNaN(parsed) ? 0 : parsed;
@@ -98,6 +103,16 @@ function recordTime(record: DashboardRecord) {
     return seconds * 1000;
   }
   return 0;
+}
+
+function recordTime(record: DashboardRecord) {
+  return timestampToMillis(record.updatedAt ?? record.updateTime ?? record.createdAt ?? record.createTime);
+}
+
+function formatDate(value: unknown) {
+  const millis = timestampToMillis(value);
+  if (!millis) return 'Not set';
+  return new Intl.DateTimeFormat('en', { month: 'short', day: 'numeric', year: 'numeric' }).format(new Date(millis));
 }
 
 async function readCollection(collectionPath: string, limit = 100) {
@@ -118,10 +133,10 @@ async function loadStore(storeId: string): Promise<StoreDocs> {
   const [profile, settings, products, services, courses, catalogItems, orders] = await Promise.all([
     getFirestoreDocument(`stores/${storeId}`).catch(() => null),
     getFirestoreDocument(`storeSettings/${storeId}`).catch(() => null),
-    readCollection('products', 200),
-    readCollection('services', 200),
-    readCollection('courses', 200),
-    readCollection('catalogItems', 200),
+    readCollection('products', 400),
+    readCollection('services', 400),
+    readCollection('courses', 400),
+    readCollection('catalogItems', 400),
     readCollection('integrationOrders', 100),
   ]);
 
@@ -138,7 +153,16 @@ function InfoCard({ label, value }: { label: string; value: string | number }) {
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
       <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</p>
-      <p className="mt-2 break-words text-lg font-bold text-slate-950">{value}</p>
+      <p className="mt-2 break-words text-base font-bold text-slate-950">{value}</p>
+    </div>
+  );
+}
+
+function DetailRow({ label, value }: { label: string; value: string | number }) {
+  return (
+    <div className="grid gap-1 rounded-2xl border border-slate-100 bg-slate-50 p-4 sm:grid-cols-[160px_1fr] sm:items-center">
+      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</p>
+      <p className="break-words text-sm font-semibold text-slate-900">{value}</p>
     </div>
   );
 }
@@ -147,14 +171,15 @@ export default async function StoreDetailPage({ params }: { params: Params }) {
   const { storeId } = await params;
   const decodedStoreId = decodeURIComponent(storeId);
   const result = await loadStore(decodedStoreId);
-  const identity = result.profile || result.settings;
-  const counts = countMap(identity?.publicCatalogDocCount);
+  const identity = mergedIdentity(result.profile, result.settings);
+  const counts = countMap(identity.publicCatalogDocCount);
   const catalogIssuesCount = result.catalogItems.reduce((sum: number, item) => sum + missingCatalogFields(item), 0);
   const recentOrders = [...result.orders].sort((a, b) => recordTime(b) - recordTime(a)).slice(0, 5);
   const shoppingConnected = nested(result.settings, ['googleShopping', 'connection', 'connected']) === true;
   const autoSyncEnabled = nested(result.settings, ['googleShopping', 'catalogSync', 'autoSyncEnabled']) === true;
+  const storeTitle = storeName(result.profile, result.settings, decodedStoreId);
 
-  if (!identity) {
+  if (!result.profile && !result.settings) {
     return (
       <div className="space-y-6">
         <Link href="/admin/stores" className="inline-flex items-center gap-2 text-sm font-semibold text-indigo-600 hover:text-indigo-500">
@@ -169,9 +194,14 @@ export default async function StoreDetailPage({ params }: { params: Params }) {
 
   return (
     <div className="space-y-6">
-      <Link href="/admin/stores" className="inline-flex items-center gap-2 text-sm font-semibold text-indigo-600 hover:text-indigo-500">
-        <ArrowLeft className="h-4 w-4" /> Back to stores
-      </Link>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <Link href="/admin/stores" className="inline-flex items-center gap-2 text-sm font-semibold text-indigo-600 hover:text-indigo-500">
+          <ArrowLeft className="h-4 w-4" /> Back to stores
+        </Link>
+        <Link href={`/admin/stores/${encodeURIComponent(decodedStoreId)}/edit`} className="inline-flex items-center gap-2 rounded-2xl bg-indigo-600 px-4 py-3 text-sm font-bold text-white transition hover:bg-indigo-500">
+          <Edit3 className="h-4 w-4" /> Edit store
+        </Link>
+      </div>
 
       <section className="rounded-3xl border border-slate-200 bg-slate-950 p-6 text-white shadow-sm sm:p-8">
         <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
@@ -179,10 +209,13 @@ export default async function StoreDetailPage({ params }: { params: Params }) {
             <div className="inline-flex items-center gap-2 rounded-full border border-indigo-300/20 bg-indigo-400/10 px-3 py-1 text-xs font-semibold text-indigo-100">
               <Store className="h-4 w-4" /> Store control page
             </div>
-            <h2 className="mt-5 text-3xl font-bold tracking-tight sm:text-4xl">{storeName(result.profile, result.settings, decodedStoreId)}</h2>
-            <p className="mt-2 max-w-2xl text-sm leading-7 text-slate-300">Store ID: {decodedStoreId}</p>
+            <h2 className="mt-5 text-3xl font-bold tracking-tight sm:text-4xl">{storeTitle}</h2>
+            <p className="mt-2 max-w-2xl break-all text-sm leading-7 text-slate-300">Store ID: {decodedStoreId}</p>
+            <p className="mt-1 max-w-2xl text-sm leading-7 text-slate-300">{text(identity, ['addressLine1', 'address'], '')} {text(identity, ['city', 'storeCity'], '')} {text(identity, ['country', 'storeCountry'], '')}</p>
           </div>
           <div className="flex flex-wrap gap-2">
+            <StatusBadge tone={identity.status === 'active' || identity.paymentStatus === 'active' ? 'green' : 'slate'}>{text(identity, ['status', 'paymentStatus'], 'Unknown')}</StatusBadge>
+            <StatusBadge tone={identity.eligibleForBuy === true ? 'green' : 'slate'}>{identity.eligibleForBuy === true ? 'Buy ready' : 'Buy not ready'}</StatusBadge>
             <StatusBadge tone={shoppingConnected ? 'green' : 'slate'}>Shopping {shoppingConnected ? 'On' : 'Off'}</StatusBadge>
             <StatusBadge tone={autoSyncEnabled ? 'green' : 'slate'}>Auto sync {autoSyncEnabled ? 'On' : 'Off'}</StatusBadge>
             <StatusBadge tone={numberField(identity.publicCatalogOutOfSyncCount) > 0 ? 'yellow' : 'green'}>{numberField(identity.publicCatalogOutOfSyncCount)} out of sync</StatusBadge>
@@ -190,39 +223,37 @@ export default async function StoreDetailPage({ params }: { params: Params }) {
         </div>
       </section>
 
-      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <InfoCard label="Public listings" value={numberField(counts.listings)} />
+      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
         <InfoCard label="Products" value={numberField(counts.products)} />
         <InfoCard label="Services" value={numberField(counts.services)} />
-        <InfoCard label="Courses" value={numberField(counts.courses)} />
+        <InfoCard label="Stock count" value={numberField(identity.totalStockCount)} />
+        <InfoCard label="Amount paid" value={`${text(identity, ['billing.currency'], 'GHS')} ${numberField(nested(identity, ['billing', 'amountPaid'])) || 0}`} />
+        <InfoCard label="Plan" value={nestedText(identity, ['billing', 'planKey'])} />
       </section>
 
       <section className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
         <div className="space-y-6">
           <SectionCard title="Store basics">
-            <div className="grid gap-3 sm:grid-cols-2">
-              <InfoCard label="Contact" value={text(identity, ['email', 'ownerEmail', 'adminEmail', 'supportEmail'])} />
-              <InfoCard label="Phone" value={text(identity, ['phone', 'contactPhone', 'businessPhone', 'whatsappNumber'])} />
-              <InfoCard label="City" value={text(identity, ['city', 'town', 'storeCity'])} />
-              <InfoCard label="Catalog issues" value={catalogIssuesCount} />
+            <div className="grid gap-3">
+              <DetailRow label="Store name" value={storeTitle} />
+              <DetailRow label="Email" value={text(identity, ['publicEmail', 'email', 'ownerEmail'])} />
+              <DetailRow label="Phone" value={text(identity, ['publicPhone', 'phone', 'phoneNumber', 'contactPhone', 'storePhone'])} />
+              <DetailRow label="Address" value={text(identity, ['addressLine1', 'address'])} />
+              <DetailRow label="City / Country" value={`${text(identity, ['city', 'storeCity'])}, ${text(identity, ['country', 'storeCountry'])}`} />
+              <DetailRow label="Website" value={text(identity, ['websiteUrl', 'websiteLink', 'storeWebsiteUrl'])} />
+              <DetailRow label="Hubtel Sender ID" value={text(identity, ['hubtelApprovedSenderId'])} />
             </div>
           </SectionCard>
 
-          <SectionCard title="Marketplace catalog repair">
-            <div className="rounded-2xl border border-indigo-100 bg-indigo-50 p-5">
-              <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                <div>
-                  <div className="flex items-center gap-2 font-semibold text-slate-950">
-                    <Hammer className="h-5 w-5 text-indigo-600" /> Repair this store from the Catalog Repair page
-                  </div>
-                  <p className="mt-2 text-sm leading-6 text-slate-600">
-                    Use this when publicListings have duplicates, draft records, or wrong product/service/course type.
-                  </p>
-                </div>
-                <Link href="/admin/catalog-repair" className="inline-flex shrink-0 items-center justify-center rounded-2xl bg-indigo-600 px-4 py-3 text-sm font-bold text-white transition hover:bg-indigo-500">
-                  Open Catalog Repair
-                </Link>
-              </div>
+          <SectionCard title="Public profile and social links">
+            <div className="grid gap-3">
+              <DetailRow label="Display name" value={nestedText(identity, ['publicProfile', 'displayName'], text(identity, ['displayName']))} />
+              <DetailRow label="Public email" value={nestedText(identity, ['publicProfile', 'publicEmail'], text(identity, ['publicEmail']))} />
+              <DetailRow label="Public phone" value={nestedText(identity, ['publicProfile', 'publicPhone'], text(identity, ['publicPhone']))} />
+              <DetailRow label="Website" value={nestedText(identity, ['publicProfile', 'websiteUrl'], text(identity, ['websiteUrl']))} />
+              <DetailRow label="Instagram" value={nestedText(identity, ['publicProfile', 'instagramHandle'], text(identity, ['instagramHandle', 'instagramUrl']))} />
+              <DetailRow label="TikTok" value={nestedText(identity, ['publicProfile', 'tiktokHandle'], text(identity, ['tiktokHandle', 'tiktokUrl']))} />
+              <DetailRow label="WhatsApp" value={nestedText(identity, ['publicProfile', 'whatsappNumber'], text(identity, ['whatsappNumber']))} />
             </div>
           </SectionCard>
 
@@ -252,12 +283,45 @@ export default async function StoreDetailPage({ params }: { params: Params }) {
         </div>
 
         <div className="space-y-6">
-          <SectionCard title="Google Shopping setup">
-            <div className="space-y-3 text-sm text-slate-600">
-              <InfoCard label="Connection" value={nestedText(result.settings, ['googleShopping', 'connection', 'connected'])} />
-              <InfoCard label="Merchant ID" value={nestedText(result.settings, ['googleShopping', 'connection', 'merchantId'])} />
-              <InfoCard label="Auto sync" value={nestedText(result.settings, ['googleShopping', 'catalogSync', 'autoSyncEnabled'])} />
-              <InfoCard label="Integration base URL" value={nestedText(result.settings, ['googleShopping', 'catalogSync', 'integrationBaseUrl'])} />
+          <SectionCard title="Billing and marketplace">
+            <div className="grid gap-3">
+              <DetailRow label="Payment status" value={text(identity, ['paymentStatus', 'status'])} />
+              <DetailRow label="Provider" value={text(identity, ['paymentProvider'], nestedText(identity, ['billing', 'provider']))} />
+              <DetailRow label="Plan" value={nestedText(identity, ['billing', 'planKey'])} />
+              <DetailRow label="Contract status" value={text(identity, ['contractStatus'])} />
+              <DetailRow label="Contract end" value={formatDate(identity.contractEnd || nested(identity, ['billing', 'currentPeriodEnd']))} />
+              <DetailRow label="Last payment" value={formatDate(nested(identity, ['billing', 'lastPaymentAt']))} />
+              <DetailRow label="Paystack customer" value={nestedText(identity, ['billing', 'paystackCustomerCode'])} />
+            </div>
+          </SectionCard>
+
+          <SectionCard title="Google / integration setup">
+            <div className="grid gap-3">
+              <DetailRow label="Google Shopping" value={shoppingConnected ? 'Connected' : 'Not connected'} />
+              <DetailRow label="Merchant ID" value={nestedText(result.settings, ['googleShopping', 'connection', 'merchantId'])} />
+              <DetailRow label="Auto sync" value={autoSyncEnabled ? 'Enabled' : 'Disabled'} />
+              <DetailRow label="Integration base URL" value={nestedText(result.settings, ['googleShopping', 'catalogSync', 'integrationBaseUrl'])} />
+              <DetailRow label="Catalog synced" value={formatDate(identity.publicCatalogLastSyncedAt)} />
+              <DetailRow label="Catalog issues" value={catalogIssuesCount} />
+            </div>
+          </SectionCard>
+
+          <SectionCard title="Quick actions">
+            <div className="grid gap-3">
+              <Link href={`/admin/stores/${encodeURIComponent(decodedStoreId)}/edit`} className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-indigo-600 px-4 py-3 text-sm font-bold text-white transition hover:bg-indigo-500">
+                <Edit3 className="h-4 w-4" /> Edit this store
+              </Link>
+              <Link href="/admin/catalog-repair" className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50">
+                <Hammer className="h-4 w-4" /> Open Catalog Repair
+              </Link>
+              {text(identity, ['websiteUrl', 'websiteLink', 'storeWebsiteUrl'], '') ? (
+                <a href={text(identity, ['websiteUrl', 'websiteLink', 'storeWebsiteUrl'], '')} target="_blank" rel="noreferrer" className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50">
+                  <ExternalLink className="h-4 w-4" /> Open website
+                </a>
+              ) : null}
+              <Link href="/api/admin/firestore/store-settings?limit=100" className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50">
+                <Database className="h-4 w-4" /> Open raw store settings
+              </Link>
             </div>
           </SectionCard>
 
@@ -276,12 +340,6 @@ export default async function StoreDetailPage({ params }: { params: Params }) {
                 ))}
               </div>
             )}
-          </SectionCard>
-
-          <SectionCard title="Raw admin data">
-            <Link href="/api/admin/firestore/store-settings" className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50">
-              <Database className="h-4 w-4" /> Open store settings API
-            </Link>
           </SectionCard>
         </div>
       </section>
