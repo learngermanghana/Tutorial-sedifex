@@ -12,6 +12,7 @@ import PageHeader from './PageHeader';
 const titleMap: Record<string, { title: string; description: string }> = {
   '/admin': { title: 'Overview', description: 'Monitor the health and performance of your Sedifex platform.' },
   '/admin/stores': { title: 'Stores', description: 'Manage tenant stores, plans, status, and storefront operations.' },
+  '/admin/customers': { title: 'Customers', description: 'See customer records across stores, with contact details, store links, and order history.' },
   '/admin/products': { title: 'Catalog Review', description: 'Inspect Sedifex product, service, and course readiness.' },
   '/admin/google-sync': { title: 'Google Sync', description: 'Approve, block, and review products before they reach Google Merchant Center.' },
   '/admin/catalog-repair': { title: 'Catalog Repair', description: 'Rebuild public marketplace listings for each store.' },
@@ -39,6 +40,9 @@ function ShellFrame({ children }: { children: ReactNode }) {
     }
     if (pathname?.startsWith('/admin/stores/')) {
       return { title: 'Store Details', description: 'Review rich store profile, catalog, billing, and integration status.' };
+    }
+    if (pathname?.startsWith('/admin/customers/')) {
+      return { title: 'Customer Details', description: 'Review a customer profile, contact details, linked store, and order history.' };
     }
     return titleMap[pathname] ?? { title: 'Admin', description: 'Sedifex administration portal.' };
   }, [pathname]);
