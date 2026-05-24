@@ -1,48 +1,92 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Bell, ShoppingCart } from 'lucide-react';
+import { AlertTriangle, Bell, CheckCircle2, Clock3, Download, PackageCheck, PackageOpen, Search, ShoppingCart, Truck, XCircle } from 'lucide-react';
+
+type OrderItem = {
+  name?: string;
+  productName?: string;
+  itemName?: string;
+  serviceName?: string;
+  qty?: number;
+  quantity?: number;
+  item_type?: string;
+  type?: string;
+  price?: number;
+  unitPrice?: number;
+};
 
 type OrderRecord = {
   id: string;
-  createdAt?: string;
-  updatedAt?: string;
+  path?: string;
+  createTime?: string | null;
+  updateTime?: string | null;
+  createdAt?: unknown;
+  updatedAt?: unknown;
   source?: string;
   sourceChannel?: string;
+  sourceLabel?: string;
   storeId?: string;
+  storeName?: string;
+  merchantName?: string;
   amount?: number;
   amountMinor?: number;
   amountPaid?: number;
   finalTotal?: number;
+  final_total?: number;
   paymentStatus?: string;
   orderStatus?: string;
-  sourceLabel?: string;
+  fulfillmentStatus?: string;
+  deliveryStatus?: string;
+  fulfillmentType?: string;
+  paymentUpdatedAt?: unknown;
+  deliveredAt?: unknown;
+  cancelledAt?: unknown;
   customerEmail?: string;
-  paymentUpdatedAt?: string;
-  updated_at?: string;
+  customerName?: string;
+  customerPhone?: string;
   customer?: { name?: string; email?: string; phone?: string };
-  items?: Array<{
-    name?: string;
-    productName?: string;
-    qty?: number;
-    quantity?: number;
-    item_type?: string;
-    type?: string;
-    price?: number;
-    unitPrice?: number;
-  }>;
+  items?: OrderItem[];
   itemCount?: number | string;
   lastPaymentMetadata?: { itemCount?: string | number };
+  statusHistory?: unknown[];
 };
 
+type Bucket = 'all' | 'new' | 'accepted' | 'preparing' | 'out_for_delivery' | 'delivered' | 'problem' | 'delayed';
+
 const POLL_MS = 20000;
+const BUCKET_LABELS: Record<Bucket, string> = {
+  all: 'All orders',
+  new: 'New / paid',
+  accepted: 'Accepted',
+  preparing: 'Preparing',
+  out_for_delivery: 'Out for delivery',
+  delivered: 'Delivered',
+  problem: 'Problem',
+  delayed: 'Delayed',
+};
+
+function clean(value: unknown, fallback = '') {
+  if (typeof value === 'string') return value.trim() || fallback;
+  if (typeof value === 'number') return String(value);
+  if (typeof value === 'boolean') return value ? 'true' : 'false';
+  return fallback;
+}
+
+function lower(value: unknown) {
+  return clean(value).toLowerCase().replace(/\s+/g, '_');
+}
 
 function money(order: OrderRecord) {
-  if (typeof order.finalTotal === 'number') return `GHS ${order.finalTotal.toFixed(2)}`;
-  if (typeof order.amountPaid === 'number') return `GHS ${order.amountPaid.toFixed(2)}`;
-  if (typeof order.amount === 'number') return `GHS ${order.amount.toFixed(2)}`;
-  if (typeof order.amountMinor === 'number') return `GHS ${(order.amountMinor / 100).toFixed(2)}`;
-  return '—';
+  const values = [order.finalTotal, order.final_total, order.amountPaid, order.amount, typeof order.amountMinor === 'number' ? order.amountMinor / 100 : undefined];
+  const amount = values.find((value) => typeof value === 'number' && Number.isFinite(value));
+  return typeof amount === 'number' ? `GHS ${amount.toFixed(2)}` : '—';
+}
+
+function amountNumber(order: OrderRecord) {
+  const values = [order.finalTotal, order.final_total, order.amountPaid, order.amount, typeof order.amountMinor === 'number' ? order.amountMinor / 100 : undefined];
+  const amount = values.find((value) => typeof value === 'number' && Number.isFinite(value));
+  return typeof amount === 'number' ? amount : 0;
 }
 
 function itemCount(order: OrderRecord) {
@@ -60,7 +104,6 @@ function timestampToMillis(value: unknown): number | null {
     return Number.isNaN(parsed) ? null : parsed;
   }
   if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value.getTime();
-
   if (typeof value === 'object') {
     const candidate = value as { toMillis?: unknown; seconds?: unknown; _seconds?: unknown };
     if (typeof candidate.toMillis === 'function') {
@@ -70,8 +113,11 @@ function timestampToMillis(value: unknown): number | null {
     const seconds = typeof candidate.seconds === 'number' ? candidate.seconds : typeof candidate._seconds === 'number' ? candidate._seconds : null;
     return seconds !== null ? seconds * 1000 : null;
   }
-
   return null;
+}
+
+function orderTime(order: OrderRecord) {
+  return timestampToMillis(order.paymentUpdatedAt) ?? timestampToMillis(order.updatedAt) ?? timestampToMillis(order.updateTime) ?? timestampToMillis(order.createdAt) ?? timestampToMillis(order.createTime) ?? 0;
 }
 
 function formatDate(value: unknown) {
@@ -80,38 +126,134 @@ function formatDate(value: unknown) {
   return new Date(millis).toLocaleString();
 }
 
+function ageLabel(order: OrderRecord) {
+  const time = orderTime(order);
+  if (!time) return 'Unknown age';
+  const minutes = Math.max(0, Math.round((Date.now() - time) / 60000));
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 48) return `${hours}h ago`;
+  return `${Math.round(hours / 24)}d ago`;
+}
+
+function buyerName(order: OrderRecord) {
+  return clean(order.customer?.name || order.customerName, 'Unknown buyer');
+}
+
+function buyerEmail(order: OrderRecord) {
+  return clean(order.customerEmail || order.customer?.email, 'No email');
+}
+
+function buyerPhone(order: OrderRecord) {
+  return clean(order.customer?.phone || order.customerPhone, 'No phone');
+}
+
+function storeLabel(order: OrderRecord) {
+  return clean(order.storeName || order.merchantName, clean(order.storeId, 'Unknown store'));
+}
+
+function statusText(order: OrderRecord) {
+  const parts = [order.orderStatus, order.fulfillmentStatus, order.deliveryStatus, order.paymentStatus].map(clean).filter(Boolean);
+  return parts.length ? parts.join(' / ') : 'No status';
+}
+
+function bucketFor(order: OrderRecord): Bucket {
+  const orderStatus = lower(order.orderStatus);
+  const fulfillmentStatus = lower(order.fulfillmentStatus);
+  const deliveryStatus = lower(order.deliveryStatus);
+  const paymentStatus = lower(order.paymentStatus);
+  const combined = [orderStatus, fulfillmentStatus, deliveryStatus, paymentStatus].join(' ');
+
+  if (/cancel|refund|failed|problem|dispute|delivery_failed/.test(combined)) return 'problem';
+  if (deliveryStatus.includes('delivered') || orderStatus.includes('delivered') || fulfillmentStatus.includes('completed') || order.deliveredAt) return 'delivered';
+  if (deliveryStatus.includes('out_for_delivery') || deliveryStatus.includes('in_transit')) return 'out_for_delivery';
+  if (/prepar|pack|processing/.test(combined)) return 'preparing';
+  if (/accepted|confirmed_by_store|ready_for_pickup/.test(combined)) return 'accepted';
+  if (/paid|success|successful|confirmed/.test(combined)) return 'new';
+  return 'new';
+}
+
+function isDelayed(order: OrderRecord) {
+  const bucket = bucketFor(order);
+  if (bucket === 'delivered' || bucket === 'problem') return false;
+  const time = orderTime(order);
+  if (!time) return false;
+  const hours = (Date.now() - time) / 36e5;
+  if (bucket === 'new') return hours >= 1;
+  if (bucket === 'accepted' || bucket === 'preparing') return hours >= 6;
+  if (bucket === 'out_for_delivery') return hours >= 12;
+  return hours >= 24;
+}
+
+function bucketTone(bucket: Bucket) {
+  if (bucket === 'delivered') return 'bg-emerald-100 text-emerald-700 ring-emerald-200';
+  if (bucket === 'problem') return 'bg-rose-100 text-rose-700 ring-rose-200';
+  if (bucket === 'delayed') return 'bg-amber-100 text-amber-800 ring-amber-200';
+  if (bucket === 'out_for_delivery') return 'bg-blue-100 text-blue-700 ring-blue-200';
+  if (bucket === 'preparing') return 'bg-purple-100 text-purple-700 ring-purple-200';
+  if (bucket === 'accepted') return 'bg-indigo-100 text-indigo-700 ring-indigo-200';
+  return 'bg-slate-100 text-slate-700 ring-slate-200';
+}
+
+function bucketIcon(bucket: Bucket) {
+  if (bucket === 'delivered') return <CheckCircle2 className="h-4 w-4" />;
+  if (bucket === 'problem') return <XCircle className="h-4 w-4" />;
+  if (bucket === 'delayed') return <AlertTriangle className="h-4 w-4" />;
+  if (bucket === 'out_for_delivery') return <Truck className="h-4 w-4" />;
+  if (bucket === 'preparing') return <PackageOpen className="h-4 w-4" />;
+  if (bucket === 'accepted') return <PackageCheck className="h-4 w-4" />;
+  return <Clock3 className="h-4 w-4" />;
+}
+
 function csvCell(value: string | number) {
-  const clean = String(value ?? '').replaceAll('"', '""');
-  return `"${clean}"`;
+  const safe = String(value ?? '').replaceAll('"', '""');
+  return `"${safe}"`;
+}
+
+function matchesSearch(order: OrderRecord, query: string) {
+  if (!query) return true;
+  const haystack = [
+    order.id,
+    order.path,
+    buyerName(order),
+    buyerEmail(order),
+    buyerPhone(order),
+    storeLabel(order),
+    order.storeId,
+    order.sourceLabel,
+    order.sourceChannel,
+    order.source,
+    statusText(order),
+    ...(order.items || []).flatMap((item) => [item.name, item.productName, item.itemName, item.serviceName]),
+  ].map(clean).join(' ').toLowerCase();
+  return haystack.includes(query.toLowerCase());
 }
 
 export default function OrdersPage() {
   const [orders, setOrders] = useState<OrderRecord[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [activeBucket, setActiveBucket] = useState<Bucket>('all');
+  const [query, setQuery] = useState('');
   const knownIds = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     let mounted = true;
     const fetchOrders = async (initial = false) => {
       try {
-        const res = await fetch('/api/admin/firestore/integration-orders?limit=75', { cache: 'no-store' });
-        const json = await res.json();
-        if (!res.ok || !json?.ok) throw new Error(json?.error || 'Failed to load orders');
-        const data: OrderRecord[] = (json.data || []).sort((a: OrderRecord, b: OrderRecord) => {
-          const aTime = timestampToMillis(a.updatedAt ?? a.createdAt) ?? 0;
-          const bTime = timestampToMillis(b.updatedAt ?? b.createdAt) ?? 0;
-          return bTime - aTime;
-        });
+        const res = await fetch('/api/admin/firestore/integration-orders?limit=100', { cache: 'no-store' });
+        const raw = await res.text();
+        let json: { ok?: boolean; data?: OrderRecord[]; error?: string } | null = null;
+        try { json = JSON.parse(raw); } catch {}
+        if (!res.ok || !json?.ok) throw new Error(json?.error || raw || 'Failed to load orders');
 
+        const data: OrderRecord[] = (json.data || []).sort((a, b) => orderTime(b) - orderTime(a));
         if (!initial) {
-          const newOrders = data.filter((o) => o.id && !knownIds.current.has(o.id));
-          if (newOrders.length > 0) {
-            alert(`🔔 ${newOrders.length} new order${newOrders.length > 1 ? 's' : ''} received.`);
-          }
+          const newOrders = data.filter((order) => order.id && !knownIds.current.has(order.id));
+          if (newOrders.length > 0) alert(`🔔 ${newOrders.length} new order${newOrders.length > 1 ? 's' : ''} received.`);
         }
 
-        knownIds.current = new Set(data.map((o) => o.id).filter(Boolean));
+        knownIds.current = new Set(data.map((order) => order.id).filter(Boolean));
         if (mounted) {
           setOrders(data);
           setError(null);
@@ -133,28 +275,45 @@ export default function OrdersPage() {
     };
   }, []);
 
-  const rows = useMemo(() => orders.slice(0, 50), [orders]);
+  const stats = useMemo(() => {
+    const initial = { all: orders.length, new: 0, accepted: 0, preparing: 0, out_for_delivery: 0, delivered: 0, problem: 0, delayed: 0 } as Record<Bucket, number>;
+    orders.forEach((order) => {
+      initial[bucketFor(order)] += 1;
+      if (isDelayed(order)) initial.delayed += 1;
+    });
+    return initial;
+  }, [orders]);
+
+  const filtered = useMemo(() => {
+    return orders.filter((order) => {
+      const bucket = bucketFor(order);
+      const bucketMatch = activeBucket === 'all' ? true : activeBucket === 'delayed' ? isDelayed(order) : bucket === activeBucket;
+      return bucketMatch && matchesSearch(order, query.trim());
+    });
+  }, [orders, activeBucket, query]);
+
+  const revenue = useMemo(() => filtered.reduce((sum, order) => sum + amountNumber(order), 0), [filtered]);
+
   const downloadCsv = () => {
-    const headers = ['Buyer', 'Phone', 'Customer Email', 'Store', 'Source Label', 'Source', 'Final Total', 'Payment Updated At', 'Item Count', 'Item Type', 'Item Name', 'Item Price', 'Status'];
-    const lines = rows.map((order) => {
+    const headers = ['Order ID', 'Buyer', 'Phone', 'Customer Email', 'Store', 'Store ID', 'Amount', 'Bucket', 'Status', 'Age', 'Payment Updated At', 'Item Count', 'First Item', 'Source'];
+    const lines = filtered.map((order) => {
       const firstItem = (order.items || [])[0];
       return [
-        order.customer?.name || 'Unknown buyer',
-        order.customer?.phone || '',
-        order.customerEmail || order.customer?.email || '',
-        order.storeId || '',
-        order.sourceLabel || '',
-        order.sourceChannel || order.source || '',
+        order.id,
+        buyerName(order),
+        buyerPhone(order),
+        buyerEmail(order),
+        storeLabel(order),
+        clean(order.storeId),
         money(order),
-        formatDate(order.paymentUpdatedAt || order.updatedAt || order.updated_at),
+        BUCKET_LABELS[bucketFor(order)],
+        statusText(order),
+        ageLabel(order),
+        formatDate(order.paymentUpdatedAt || order.updatedAt || order.updateTime || order.createdAt || order.createTime),
         itemCount(order),
-        firstItem?.item_type || firstItem?.type || '',
-        firstItem?.name || firstItem?.productName || '',
-        firstItem?.price ?? firstItem?.unitPrice ?? '',
-        order.paymentStatus || order.orderStatus || '',
-      ]
-        .map(csvCell)
-        .join(',');
+        clean(firstItem?.name || firstItem?.productName || firstItem?.itemName || firstItem?.serviceName),
+        clean(order.sourceChannel || order.source),
+      ].map((value) => csvCell(value as string | number)).join(',');
     });
 
     const csv = [headers.map(csvCell).join(','), ...lines].join('\n');
@@ -162,58 +321,119 @@ export default function OrdersPage() {
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `orders-report-${new Date().toISOString().slice(0, 10)}.csv`;
+    link.download = `sedifex-orders-monitor-${new Date().toISOString().slice(0, 10)}.csv`;
     link.click();
     URL.revokeObjectURL(url);
   };
 
   return (
-    <main className="space-y-6 p-6 lg:p-8">
-      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-        <div className="flex items-center gap-3">
-          <div className="rounded-xl bg-indigo-50 p-2 text-indigo-600"><Bell className="h-5 w-5" /></div>
+    <div className="space-y-6">
+      <section className="rounded-3xl border border-slate-200 bg-slate-950 p-6 text-white shadow-sm sm:p-8">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div>
-            <h1 className="text-xl font-semibold text-slate-950">Orders</h1>
-            <p className="text-sm text-slate-600">Auto-refreshes every {POLL_MS / 1000}s and alerts when a new order arrives.</p>
+            <div className="inline-flex items-center gap-2 rounded-full border border-indigo-300/20 bg-indigo-400/10 px-3 py-1 text-xs font-semibold text-indigo-100">
+              <Bell className="h-4 w-4" /> Live order monitoring
+            </div>
+            <h2 className="mt-5 max-w-4xl text-3xl font-bold tracking-tight sm:text-4xl">Track every Sedifex Market order until delivery.</h2>
+            <p className="mt-4 max-w-3xl text-sm leading-7 text-slate-300">
+              Monitor paid orders, store acceptance, preparation, delivery progress, delayed orders, and problem cases. This page refreshes every {POLL_MS / 1000} seconds.
+            </p>
           </div>
-        </div>
-      </div>
-
-      <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-        <div className="mb-3 flex justify-end">
-          <button type="button" onClick={downloadCsv} className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50">
-            Download report (CSV)
+          <button type="button" onClick={downloadCsv} className="inline-flex items-center justify-center gap-2 rounded-2xl bg-white px-4 py-3 text-sm font-bold text-slate-950 hover:bg-slate-100">
+            <Download className="h-4 w-4" /> Download CSV
           </button>
         </div>
-        {loading ? <p className="text-sm text-slate-500">Loading orders…</p> : null}
-        {error ? <p className="text-sm text-red-600">{error}</p> : null}
+      </section>
+
+      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"><p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Orders loaded</p><p className="mt-2 text-2xl font-bold text-slate-950">{orders.length}</p><p className="mt-1 text-xs text-emerald-600">From integrationOrders</p></div>
+        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"><p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Needs action</p><p className="mt-2 text-2xl font-bold text-slate-950">{stats.new + stats.accepted + stats.preparing + stats.out_for_delivery}</p><p className="mt-1 text-xs text-amber-600">Not delivered yet</p></div>
+        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"><p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Delayed</p><p className="mt-2 text-2xl font-bold text-slate-950">{stats.delayed}</p><p className="mt-1 text-xs text-rose-600">Requires follow-up</p></div>
+        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"><p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Shown value</p><p className="mt-2 text-2xl font-bold text-slate-950">GHS {revenue.toFixed(2)}</p><p className="mt-1 text-xs text-slate-500">Current filter total</p></div>
+      </section>
+
+      <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8">
+            {(['all', 'new', 'accepted', 'preparing', 'out_for_delivery', 'delivered', 'problem', 'delayed'] as Bucket[]).map((bucket) => (
+              <button
+                key={bucket}
+                type="button"
+                onClick={() => setActiveBucket(bucket)}
+                className={`rounded-2xl border px-3 py-2 text-left text-xs font-bold transition ${activeBucket === bucket ? 'border-indigo-300 bg-indigo-50 text-indigo-900 ring-4 ring-indigo-100' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}`}
+              >
+                <span className="flex items-center gap-2">{bucketIcon(bucket)} {BUCKET_LABELS[bucket]}</span>
+                <span className="mt-1 block text-lg text-slate-950">{stats[bucket]}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="mt-5 flex items-center rounded-2xl border border-slate-200 px-3 focus-within:border-indigo-300 focus-within:ring-4 focus-within:ring-indigo-100">
+          <Search className="h-4 w-4 text-slate-400" />
+          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search order ID, buyer, phone, store, item, status" className="w-full border-0 bg-transparent px-3 py-3 text-sm outline-none" />
+        </div>
+
+        {loading ? <p className="mt-5 rounded-2xl bg-slate-50 p-4 text-sm text-slate-500">Loading orders…</p> : null}
+        {error ? <p className="mt-5 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">{error}</p> : null}
+
         {!loading && !error ? (
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-slate-200 text-sm">
-              <thead>
-                <tr className="text-left text-xs uppercase tracking-wide text-slate-500">
-                  <th className="px-3 py-2">Buyer</th><th className="px-3 py-2">Store</th><th className="px-3 py-2">Amount received</th><th className="px-3 py-2">Source label</th><th className="px-3 py-2">Payment updated</th><th className="px-3 py-2">Item count</th><th className="px-3 py-2">Items</th><th className="px-3 py-2">Source</th><th className="px-3 py-2">Status</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {rows.map((order) => (
-                  <tr key={order.id}>
-                    <td className="px-3 py-3 min-w-72"><p className="font-medium text-slate-900">{order.customer?.name || 'Unknown buyer'}</p><p className="text-xs text-slate-500">{order.customer?.phone || 'No phone'}</p><p className="text-xs text-slate-500">{order.customerEmail || order.customer?.email || 'No email'}</p></td>
-                    <td className="px-3 py-3 font-mono text-xs text-slate-700">{order.storeId || '—'}</td>
-                    <td className="px-3 py-3 font-semibold text-slate-900">{money(order)}</td>
-                    <td className="px-3 py-3 text-xs text-slate-700">{order.sourceLabel || '—'}</td>
-                    <td className="px-3 py-3 text-xs text-slate-700 whitespace-nowrap">{formatDate(order.paymentUpdatedAt || order.updatedAt || order.updated_at)}</td>
-                    <td className="px-3 py-3 text-xs text-slate-700">{itemCount(order)}</td>
-                    <td className="px-3 py-3 text-slate-700 min-w-96"><div className="flex items-start gap-2"><ShoppingCart className="mt-0.5 h-4 w-4 text-slate-400" /><div>{(order.items || []).slice(0, 2).map((i, idx) => (<p key={`${order.id}-item-${idx}`} className="text-xs">{i.item_type || i.type || 'item'} • {i.name || i.productName || 'Item'} • GHS {Number(i.price ?? i.unitPrice ?? 0).toFixed(2)} × {i.qty || i.quantity || 1}</p>))}{(order.items || []).length > 2 ? <p className="text-xs text-slate-500">+{(order.items || []).length - 2} more</p> : null}</div></div></td>
-                    <td className="px-3 py-3 text-xs text-slate-700">{order.sourceChannel || order.source || '—'}</td>
-                    <td className="px-3 py-3 text-xs text-slate-700">{order.paymentStatus || order.orderStatus || '—'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="mt-5 overflow-hidden rounded-2xl border border-slate-200">
+            <div className="hidden grid-cols-[1.1fr_1fr_0.85fr_0.9fr_1fr_0.9fr] gap-4 border-b border-slate-200 bg-slate-50 px-4 py-3 text-xs font-bold uppercase tracking-wide text-slate-500 xl:grid">
+              <span>Buyer</span><span>Store</span><span>Amount</span><span>Status</span><span>Items</span><span>Timing</span>
+            </div>
+            <div className="divide-y divide-slate-100">
+              {filtered.length === 0 ? <div className="p-8 text-center text-sm text-slate-500">No orders match this filter.</div> : null}
+              {filtered.slice(0, 100).map((order) => {
+                const bucket = bucketFor(order);
+                const delayed = isDelayed(order);
+                const shownBucket: Bucket = delayed && bucket !== 'problem' && bucket !== 'delivered' ? 'delayed' : bucket;
+                return (
+                  <div key={order.id} className="grid gap-4 px-4 py-4 text-sm xl:grid-cols-[1.1fr_1fr_0.85fr_0.9fr_1fr_0.9fr] xl:items-center">
+                    <div className="min-w-0">
+                      <p className="truncate font-semibold text-slate-950">{buyerName(order)}</p>
+                      <p className="truncate text-xs text-slate-500">{buyerPhone(order)} · {buyerEmail(order)}</p>
+                      <p className="mt-1 break-all text-xs text-slate-400">{order.id}</p>
+                    </div>
+                    <div className="min-w-0">
+                      <p className="truncate font-semibold text-slate-950">{storeLabel(order)}</p>
+                      <p className="break-all text-xs text-slate-500">{order.storeId || 'No store ID'}</p>
+                      <p className="text-xs text-slate-400">{order.sourceLabel || order.sourceChannel || order.source || '—'}</p>
+                    </div>
+                    <div>
+                      <p className="font-bold text-slate-950">{money(order)}</p>
+                      <p className="text-xs text-slate-500">{itemCount(order)} item(s)</p>
+                    </div>
+                    <div>
+                      <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-bold ring-1 ${bucketTone(shownBucket)}`}>{bucketIcon(shownBucket)} {BUCKET_LABELS[shownBucket]}</span>
+                      <p className="mt-2 text-xs text-slate-500">{statusText(order)}</p>
+                    </div>
+                    <div className="min-w-0">
+                      <div className="flex items-start gap-2">
+                        <ShoppingCart className="mt-0.5 h-4 w-4 text-slate-400" />
+                        <div className="min-w-0">
+                          {(order.items || []).slice(0, 2).map((item, index) => (
+                            <p key={`${order.id}-item-${index}`} className="truncate text-xs text-slate-700">
+                              {item.item_type || item.type || 'item'} • {item.name || item.productName || item.itemName || item.serviceName || 'Item'} × {item.qty || item.quantity || 1}
+                            </p>
+                          ))}
+                          {(order.items || []).length === 0 ? <p className="text-xs text-slate-500">No item details</p> : null}
+                          {(order.items || []).length > 2 ? <p className="text-xs text-slate-500">+{(order.items || []).length - 2} more</p> : null}
+                        </div>
+                      </div>
+                    </div>
+                    <div>
+                      <p className="font-semibold text-slate-700">{ageLabel(order)}</p>
+                      <p className="text-xs text-slate-500">{formatDate(order.paymentUpdatedAt || order.updatedAt || order.updateTime || order.createdAt || order.createTime)}</p>
+                      {order.deliveredAt ? <p className="mt-1 text-xs text-emerald-600">Delivered: {formatDate(order.deliveredAt)}</p> : null}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           </div>
         ) : null}
       </section>
-    </main>
+    </div>
   );
 }
