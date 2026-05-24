@@ -78,15 +78,8 @@ export async function POST(request: Request) {
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error || 'Image upload failed.');
     const isTruncated = /truncated/i.test(message);
-    const isMissingBucket = /specified bucket does not exist/i.test(message);
     return NextResponse.json(
-      {
-        error: isTruncated
-          ? 'Upload request was truncated before it reached the server. Please retry with a smaller image (under 2 MB) or convert to JPG/WEBP.'
-          : isMissingBucket
-            ? 'Firebase storage bucket is misconfigured or does not exist. Set FIREBASE_STORAGE_BUCKET to an existing bucket name (for example: <project-id>.appspot.com).'
-            : message,
-      },
+      { error: isTruncated ? 'Upload request was truncated before it reached the server. Please retry with a smaller image (under 2 MB) or convert to JPG/WEBP.' : message },
       { status: isTruncated ? 413 : 500 },
     );
   }
