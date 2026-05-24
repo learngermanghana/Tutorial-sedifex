@@ -2,9 +2,18 @@
 
 import { FormEvent, useMemo, useState } from 'react';
 import { Mail, RefreshCw, Search, Send, Users } from 'lucide-react';
-import type { MarketingContact, MarketingSenderStore } from '../../lib/marketing-contacts';
+import type { MarketingContact } from '../../lib/marketing-contacts';
 
-type SendResult = { ok?: boolean; error?: string; sentToScript?: number; detail?: string } | null;
+type AudienceMode = 'stores' | 'customers' | 'both';
+type SendResult = {
+  ok?: boolean;
+  error?: string;
+  sentToScript?: number;
+  detail?: string;
+  httpStatus?: number;
+  rawResponse?: string;
+  response?: unknown;
+} | null;
 
 function sourceOptions(contacts: MarketingContact[]) {
   return Array.from(new Set(contacts.flatMap((contact) => contact.source.split(',')).filter(Boolean))).sort();
@@ -21,14 +30,56 @@ function bodyToHtml(value: string) {
     .join('\n');
 }
 
-export default function MarketingCenterClient({ contacts, stores }: { contacts: MarketingContact[]; stores: MarketingSenderStore[] }) {
+function parts(value: string) {
+  return value.split(',').map((item) => item.trim()).filter(Boolean);
+}
+
+function isStoreContact(contact: MarketingContact) {
+  const sources = parts(contact.source);
+  const roles = parts(contact.role);
+  return sources.includes('stores') || roles.includes('store_owner');
+}
+
+function isCustomerContact(contact: MarketingContact) {
+  const sources = parts(contact.source);
+  const roles = parts(contact.role);
+  return sources.some((item) => ['customers', 'orders', 'bookings', 'support_requests'].includes(item)) ||
+    roles.some((item) => ['customer', 'buyer', 'booking_customer', 'support_request'].includes(item));
+}
+
+function contactMatchesAudience(contact: MarketingContact, audience: AudienceMode) {
+  if (audience === 'stores') return isStoreContact(contact);
+  if (audience === 'customers') return isCustomerContact(contact);
+  return isStoreContact(contact) || isCustomerContact(contact);
+}
+
+function parseMaybeJson(value: string) {
+  if (!value.trim()) return null;
+  try {
+    return JSON.parse(value) as unknown;
+  } catch {
+    return null;
+  }
+}
+
+function pretty(value: unknown) {
+  if (value == null) return '';
+  if (typeof value === 'string') return value;
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
+export default function MarketingCenterClient({ contacts }: { contacts: MarketingContact[] }) {
   const [query, setQuery] = useState('');
+  const [audience, setAudience] = useState<AudienceMode>('both');
   const [source, setSource] = useState('all');
   const [role, setRole] = useState('all');
   const [storeIdFilter, setStoreIdFilter] = useState('all');
   const [includeOptOut, setIncludeOptOut] = useState(false);
   const [selectedEmails, setSelectedEmails] = useState<string[]>([]);
-  const [senderStoreId, setSenderStoreId] = useState(stores.find((store) => store.hasBulkEmailIntegration)?.id ?? stores[0]?.id ?? '');
   const [subject, setSubject] = useState('');
   const [body, setBody] = useState('');
   const [sending, setSending] = useState(false);
@@ -44,9 +95,16 @@ export default function MarketingCenterClient({ contacts, stores }: { contacts: 
     return Array.from(map.entries()).sort((a, b) => a[1].localeCompare(b[1]));
   }, [contacts]);
 
+  const audienceCounts = useMemo(() => ({
+    stores: contacts.filter((contact) => !contact.optedOut && isStoreContact(contact)).length,
+    customers: contacts.filter((contact) => !contact.optedOut && isCustomerContact(contact)).length,
+    both: contacts.filter((contact) => !contact.optedOut && (isStoreContact(contact) || isCustomerContact(contact))).length,
+  }), [contacts]);
+
   const filteredContacts = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
     return contacts.filter((contact) => {
+      if (!contactMatchesAudience(contact, audience)) return false;
       if (!includeOptOut && contact.optedOut) return false;
       if (source !== 'all' && !contact.source.split(',').includes(source)) return false;
       if (role !== 'all' && !contact.role.split(',').includes(role)) return false;
@@ -55,12 +113,12 @@ export default function MarketingCenterClient({ contacts, stores }: { contacts: 
       const haystack = [contact.name, contact.email, contact.phone, contact.source, contact.role, contact.storeName, contact.tags.join(' ')].join(' ').toLowerCase();
       return haystack.includes(normalizedQuery);
     });
-  }, [contacts, includeOptOut, query, role, source, storeIdFilter]);
+  }, [contacts, audience, includeOptOut, query, role, source, storeIdFilter]);
 
   const selectedContacts = useMemo(() => {
     const selected = new Set(selectedEmails);
-    return contacts.filter((contact) => selected.has(contact.email) && (includeOptOut || !contact.optedOut));
-  }, [contacts, includeOptOut, selectedEmails]);
+    return contacts.filter((contact) => selected.has(contact.email) && contactMatchesAudience(contact, audience) && (includeOptOut || !contact.optedOut));
+  }, [contacts, audience, includeOptOut, selectedEmails]);
 
   function toggleVisibleSelection() {
     const visibleEmails = filteredContacts.map((contact) => contact.email);
@@ -73,6 +131,11 @@ export default function MarketingCenterClient({ contacts, stores }: { contacts: 
     }
   }
 
+  function selectAudienceOnly(nextAudience: AudienceMode) {
+    setAudience(nextAudience);
+    setSelectedEmails([]);
+  }
+
   async function handleSend(event: FormEvent) {
     event.preventDefault();
     setResult(null);
@@ -83,7 +146,7 @@ export default function MarketingCenterClient({ contacts, stores }: { contacts: 
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
-          storeId: senderStoreId,
+          audience,
           subject,
           text: body,
           html: bodyToHtml(body),
@@ -93,11 +156,29 @@ export default function MarketingCenterClient({ contacts, stores }: { contacts: 
             phone: contact.phone,
             source: contact.source,
             role: contact.role,
+            storeId: contact.storeId,
+            storeName: contact.storeName,
           })),
         }),
       });
-      const data = await response.json().catch(() => ({}));
-      setResult(data);
+
+      const rawResponse = await response.text();
+      const parsed = parseMaybeJson(rawResponse) as SendResult;
+      const data = parsed && typeof parsed === 'object' ? parsed : null;
+
+      if (!response.ok) {
+        setResult({
+          ok: false,
+          httpStatus: response.status,
+          error: data?.error || `Marketing API returned HTTP ${response.status}.`,
+          detail: data?.detail || rawResponse || 'The server returned an empty response body.',
+          rawResponse,
+          response: data,
+        });
+        return;
+      }
+
+      setResult(data || { ok: false, httpStatus: response.status, error: 'Marketing API returned an empty or non-JSON response.', rawResponse });
     } catch (error) {
       setResult({ ok: false, error: error instanceof Error ? error.message : 'Unable to send campaign.' });
     } finally {
@@ -111,9 +192,23 @@ export default function MarketingCenterClient({ contacts, stores }: { contacts: 
         <div className="flex items-start justify-between gap-4">
           <div>
             <h2 className="text-lg font-semibold text-slate-950">Audience database</h2>
-            <p className="mt-1 text-sm leading-6 text-slate-600">Filter customers, stores, students, donors, volunteers, bookings, and orders.</p>
+            <p className="mt-1 text-sm leading-6 text-slate-600">Choose stores, customers, or both. Campaigns are sent as Sedifex Team, not as an individual store.</p>
           </div>
           <span className="rounded-2xl bg-indigo-50 p-3 text-indigo-600"><Users className="h-5 w-5" /></span>
+        </div>
+
+        <div className="mt-5 grid gap-3 md:grid-cols-3">
+          {(['stores', 'customers', 'both'] as AudienceMode[]).map((item) => (
+            <button
+              key={item}
+              type="button"
+              onClick={() => selectAudienceOnly(item)}
+              className={`rounded-2xl border px-4 py-3 text-left text-sm transition ${audience === item ? 'border-indigo-300 bg-indigo-50 text-indigo-900 ring-4 ring-indigo-100' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}`}
+            >
+              <span className="block font-bold capitalize">{item === 'both' ? 'Stores + Customers' : item}</span>
+              <span className="mt-1 block text-xs text-slate-500">{audienceCounts[item]} available contacts</span>
+            </button>
+          ))}
         </div>
 
         <div className="mt-5 grid gap-3 lg:grid-cols-4">
@@ -136,7 +231,7 @@ export default function MarketingCenterClient({ contacts, stores }: { contacts: 
               {roles.map((item) => <option key={item} value={item}>{item}</option>)}
             </select>
           </label>
-          <label className="text-sm font-medium text-slate-700 lg:col-span-2">Store
+          <label className="text-sm font-medium text-slate-700 lg:col-span-2">Store filter
             <select value={storeIdFilter} onChange={(event) => setStoreIdFilter(event.target.value)} className="mt-2 w-full rounded-2xl border border-slate-200 px-3 py-3 text-sm outline-none focus:border-indigo-300 focus:ring-4 focus:ring-indigo-100">
               <option value="all">All stores</option>
               {storeFilters.map(([id, name]) => <option key={id} value={id}>{name} · {id}</option>)}
@@ -175,18 +270,17 @@ export default function MarketingCenterClient({ contacts, stores }: { contacts: 
       <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <h2 className="text-lg font-semibold text-slate-950">Send marketing email</h2>
-            <p className="mt-1 text-sm leading-6 text-slate-600">Uses the selected store’s Google Apps Script bulk email integration.</p>
+            <h2 className="text-lg font-semibold text-slate-950">Send Sedifex Team email</h2>
+            <p className="mt-1 text-sm leading-6 text-slate-600">Sender identity: <strong>Sedifex Team</strong>. Uses the Sedifex marketing Apps Script configured in Vercel.</p>
           </div>
           <span className="rounded-2xl bg-emerald-50 p-3 text-emerald-600"><Mail className="h-5 w-5" /></span>
         </div>
 
         <form className="mt-5 space-y-4" onSubmit={handleSend}>
-          <label className="block text-sm font-medium text-slate-700">Sending store
-            <select value={senderStoreId} onChange={(event) => setSenderStoreId(event.target.value)} className="mt-2 w-full rounded-2xl border border-slate-200 px-3 py-3 text-sm outline-none focus:border-indigo-300 focus:ring-4 focus:ring-indigo-100">
-              {stores.map((store) => <option key={store.id} value={store.id}>{store.name} {store.hasBulkEmailIntegration ? '✓' : '⚠ no Apps Script'}</option>)}
-            </select>
-          </label>
+          <div className="rounded-2xl border border-indigo-200 bg-indigo-50 p-4 text-sm leading-6 text-indigo-900">
+            <strong>Sending as Sedifex Team</strong>
+            <p className="mt-1">Choose the audience on the left: all stores, all customers, or both. The message will not use a store name as sender.</p>
+          </div>
           <label className="block text-sm font-medium text-slate-700">Subject
             <input value={subject} onChange={(event) => setSubject(event.target.value)} placeholder="Your campaign subject" className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-indigo-300 focus:ring-4 focus:ring-indigo-100" />
           </label>
@@ -200,15 +294,21 @@ export default function MarketingCenterClient({ contacts, stores }: { contacts: 
 
           <button disabled={sending || selectedContacts.length === 0} className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-indigo-600 px-5 py-3 text-sm font-bold text-white shadow-sm transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-60">
             {sending ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-            {sending ? 'Sending to Apps Script…' : `Send to ${selectedContacts.length} contacts`}
+            {sending ? 'Sending to Sedifex Apps Script…' : `Send to ${selectedContacts.length} selected ${audience === 'both' ? 'contacts' : audience}`}
           </button>
         </form>
 
         {result ? (
           <div className={`mt-5 rounded-2xl border p-4 text-sm ${result.ok ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-red-200 bg-red-50 text-red-800'}`}>
             <strong>{result.ok ? 'Campaign sent to Apps Script' : 'Campaign failed'}</strong>
-            <p className="mt-1 leading-6">{result.ok ? `${result.sentToScript ?? 0} recipients submitted.` : result.error}</p>
-            {result.detail ? <pre className="mt-2 whitespace-pre-wrap text-xs">{result.detail}</pre> : null}
+            <p className="mt-1 leading-6">{result.ok ? `${result.sentToScript ?? 0} recipients submitted.` : result.error || 'Unknown error.'}</p>
+            {!result.ok ? (
+              <div className="mt-3 rounded-xl bg-white/70 p-3 text-xs text-red-900 ring-1 ring-red-200">
+                <p className="font-bold">Exact error details</p>
+                <pre className="mt-2 max-h-72 overflow-auto whitespace-pre-wrap">{result.detail || result.rawResponse || pretty(result.response) || 'No response detail was returned.'}</pre>
+              </div>
+            ) : null}
+            {result.ok && result.response ? <pre className="mt-2 max-h-60 overflow-auto whitespace-pre-wrap text-xs">{pretty(result.response)}</pre> : null}
           </div>
         ) : null}
       </section>
