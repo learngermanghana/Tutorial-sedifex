@@ -1,11 +1,20 @@
+import { randomUUID } from 'crypto';
 import { NextResponse } from 'next/server';
-import { adminStorageBucket, getFirebaseEnvStatus } from '../../../../../lib/firebase-admin';
+import { getFirebaseEnvStatus } from '../../../../../lib/firebase-admin';
+import { resolveExistingFirebaseStorageBucket } from '../../../../../lib/firebase-storage-resolver';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 const SUPPORTED_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
+
+type UploadedImageFile = {
+  name?: string;
+  size: number;
+  type?: string;
+  arrayBuffer: () => Promise<ArrayBuffer>;
+};
 
 function safeFilename(value: string) {
   const cleaned = value.trim().replace(/[^a-zA-Z0-9._-]/g, '_').replace(/_+/g, '_');
@@ -29,8 +38,31 @@ function detectImageMimeType(buffer: Buffer) {
   return null;
 }
 
-function storagePublicUrl(bucketName: string, objectName: string) {
-  return `https://storage.googleapis.com/${bucketName}/${encodeURI(objectName)}`;
+function firebaseDownloadUrl(bucketName: string, objectName: string, token: string) {
+  return `https://firebasestorage.googleapis.com/v0/b/${bucketName}/o/${encodeURIComponent(objectName)}?alt=media&token=${encodeURIComponent(token)}`;
+}
+
+function getUploadedImageFile(value: FormDataEntryValue | null): UploadedImageFile | null {
+  if (!value || typeof value !== 'object') return null;
+  const maybeFile = value as unknown as Partial<UploadedImageFile>;
+  if (typeof maybeFile.size !== 'number' || typeof maybeFile.arrayBuffer !== 'function') return null;
+  return {
+    name: typeof maybeFile.name === 'string' ? maybeFile.name : 'advert-image',
+    size: maybeFile.size,
+    type: typeof maybeFile.type === 'string' ? maybeFile.type : undefined,
+    arrayBuffer: maybeFile.arrayBuffer,
+  };
+}
+
+export async function GET() {
+  return NextResponse.json({
+    ok: true,
+    route: '/api/admin/adverts/upload',
+    method: 'POST',
+    field: 'imageFile',
+    maxSizeMb: 5,
+    version: '2026-05-24-firebase-download-url',
+  });
 }
 
 export async function POST(request: Request) {
@@ -39,41 +71,49 @@ export async function POST(request: Request) {
     if (!env.ready) return NextResponse.json({ error: 'Firebase environment variables are not ready.' }, { status: 500 });
 
     const formData = await request.formData();
-    const fileValue = formData.get('imageFile');
+    const uploadedFile = getUploadedImageFile(formData.get('imageFile'));
     const advertId = typeof formData.get('advertId') === 'string' && String(formData.get('advertId')).trim() ? String(formData.get('advertId')).trim() : 'new';
 
-    if (!(fileValue instanceof File) || fileValue.size === 0) {
+    if (!uploadedFile || uploadedFile.size === 0) {
       return NextResponse.json({ error: 'Choose an image first.' }, { status: 400 });
     }
-    if (fileValue.size > MAX_IMAGE_BYTES) {
+    if (uploadedFile.size > MAX_IMAGE_BYTES) {
       return NextResponse.json({ error: 'Advert image is too large. Maximum upload size is 5 MB.' }, { status: 413 });
     }
 
-    const buffer = Buffer.from(await fileValue.arrayBuffer());
+    const buffer = Buffer.from(await uploadedFile.arrayBuffer());
     const detectedMimeType = detectImageMimeType(buffer);
     if (!detectedMimeType || !SUPPORTED_IMAGE_TYPES.has(detectedMimeType)) {
       return NextResponse.json({ error: 'Unsupported image file. Upload JPG, PNG, WEBP, or GIF.' }, { status: 400 });
     }
 
-    const originalName = safeFilename(fileValue.name || 'advert-image');
+    const originalName = safeFilename(uploadedFile.name || 'advert-image');
     const basename = originalName.replace(/\.(jpe?g|png|webp|gif)$/i, '') || 'advert-image';
     const extension = resolveExtension(originalName, detectedMimeType);
     const objectName = `marketplace-adverts/${advertId}/${Date.now()}-${basename}${extension}`;
-    const bucket = adminStorageBucket();
+    const { bucket, bucketName, candidates } = await resolveExistingFirebaseStorageBucket();
     const target = bucket.file(objectName);
+    const downloadToken = randomUUID();
 
     await target.save(buffer, {
       resumable: false,
       metadata: {
         contentType: detectedMimeType,
         cacheControl: 'public,max-age=31536000,immutable',
+        metadata: {
+          firebaseStorageDownloadTokens: downloadToken,
+        },
       },
     });
 
     return NextResponse.json({
       success: true,
-      imageUrl: storagePublicUrl(bucket.name, objectName),
+      ok: true,
+      imageUrl: firebaseDownloadUrl(bucketName, objectName, downloadToken),
       imagePath: objectName,
+      bucketName,
+      triedBuckets: candidates,
+      version: '2026-05-24-firebase-download-url',
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error || 'Image upload failed.');
