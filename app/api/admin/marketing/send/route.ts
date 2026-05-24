@@ -66,7 +66,6 @@ function plainTextFromHtml(html: string) {
 function sedifexMarketingConfig() {
   const webAppUrl = (
     process.env.SEDIFEX_MARKETING_APPS_SCRIPT_URL ||
-    process.env.SEDIFEX_MARKETING_APPS_SCRIPT_URL ||
     process.env.MARKETING_APPS_SCRIPT_WEBHOOK_URL ||
     process.env.APPS_SCRIPT_MARKETING_WEBHOOK_URL ||
     ''
@@ -74,7 +73,6 @@ function sedifexMarketingConfig() {
 
   const sharedToken = (
     process.env.SEDIFEX_MARKETING_SHARED_TOKEN ||
-    process.env.MARKETING_APPS_SCRIPT_TOKEN ||
     process.env.MARKETING_APPS_SCRIPT_TOKEN ||
     process.env.SEDIFEX_SHARED_TOKEN ||
     ''
@@ -93,6 +91,11 @@ function responseSnippet(value: string, max = 3000) {
   return value.length > max ? `${value.slice(0, max)}\n…[truncated ${value.length - max} chars]` : value;
 }
 
+function campaignIdForRequest(audience: string) {
+  const randomPart = typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : Math.random().toString(36).slice(2, 10);
+  return `sedifex_${audience}_${Date.now()}_${randomPart}`.replace(/[^a-zA-Z0-9_-]/g, '_');
+}
+
 export async function POST(req: Request) {
   const role = cookieValue(req, 'sedifex_admin_role');
   if (!isAllowedRole(role)) {
@@ -106,6 +109,8 @@ export async function POST(req: Request) {
   const recipients = sanitizeRecipients(body?.recipients);
   const audience = cleanText(body?.audience) || 'both';
   const config = sedifexMarketingConfig();
+  const campaignId = campaignIdForRequest(audience);
+  const createdAt = new Date().toISOString();
 
   if (!config.webAppUrl) return NextResponse.json({ ok: false, error: 'SEDIFEX_MARKETING_APPS_SCRIPT_URL is not configured.', detail: 'Add SEDIFEX_MARKETING_APPS_SCRIPT_URL in Vercel. Your screenshot shows SEDIFEX_MARKETING_APPS_SCRIPT_URL may be named differently. Use the exact key expected by the app.' }, { status: 500 });
   if (!config.sharedToken) return NextResponse.json({ ok: false, error: 'SEDIFEX_MARKETING_SHARED_TOKEN is not configured.', detail: 'Add SEDIFEX_MARKETING_SHARED_TOKEN or MARKETING_APPS_SCRIPT_TOKEN in Vercel.' }, { status: 500 });
@@ -115,6 +120,8 @@ export async function POST(req: Request) {
 
   const outboundPayload = {
     action: 'sendSedifexMarketingEmail',
+    campaignId,
+    createdAt,
     token: config.sharedToken,
     sharedToken: config.sharedToken,
     fromEmail: config.fromEmail,
@@ -152,6 +159,7 @@ export async function POST(req: Request) {
         httpStatus: response.status,
         detail: responseSnippet(responseText || response.statusText || 'No response body returned from Apps Script.'),
         response: parsed,
+        campaignId,
         requestSummary: {
           appScriptUrlConfigured: Boolean(config.webAppUrl),
           sender: `${config.fromName} <${config.fromEmail}>`,
@@ -165,15 +173,22 @@ export async function POST(req: Request) {
       const parsedRecord = parsed as { error?: unknown; message?: unknown; detail?: unknown };
       return NextResponse.json({
         ok: false,
+        campaignId,
         error: cleanText(parsedRecord.error) || cleanText(parsedRecord.message) || 'Apps Script returned ok:false.',
         detail: cleanText(parsedRecord.detail) || responseSnippet(responseText),
         response: parsed,
       }, { status: 502 });
     }
 
+    const scriptResponse = parsed && typeof parsed === 'object' ? parsed as Record<string, unknown> : null;
     return NextResponse.json({
       ok: true,
+      campaignId,
       sentToScript: recipients.length,
+      queued: typeof scriptResponse?.queued === 'number' ? scriptResponse.queued : undefined,
+      processedNow: typeof scriptResponse?.processedNow === 'number' ? scriptResponse.processedNow : undefined,
+      remainingDailyQuota: typeof scriptResponse?.remainingDailyQuota === 'number' ? scriptResponse.remainingDailyQuota : undefined,
+      queue: scriptResponse?.queue,
       fromEmail: config.fromEmail,
       fromName: config.fromName,
       audience,
@@ -182,6 +197,7 @@ export async function POST(req: Request) {
   } catch (error) {
     return NextResponse.json({
       ok: false,
+      campaignId,
       error: error instanceof Error ? error.message : 'Unable to send Sedifex marketing email.',
       detail: error instanceof Error ? error.stack : undefined,
       requestSummary: {
