@@ -64,10 +64,16 @@ function errorJson(error: unknown, status = 500) {
   return json({ ok: false, error: message }, status);
 }
 
-function isUploadedImageFile(value: FormDataEntryValue | null): value is UploadedImageFile {
-  if (!value || typeof value !== 'object') return false;
-  const maybeFile = value as Partial<UploadedImageFile>;
-  return typeof maybeFile.size === 'number' && typeof maybeFile.arrayBuffer === 'function';
+function getUploadedImageFile(value: FormDataEntryValue | null): UploadedImageFile | null {
+  if (!value || typeof value !== 'object') return null;
+  const maybeFile = value as unknown as Partial<UploadedImageFile>;
+  if (typeof maybeFile.size !== 'number' || typeof maybeFile.arrayBuffer !== 'function') return null;
+  return {
+    name: typeof maybeFile.name === 'string' ? maybeFile.name : 'marketing-image',
+    size: maybeFile.size,
+    type: typeof maybeFile.type === 'string' ? maybeFile.type : undefined,
+    arrayBuffer: maybeFile.arrayBuffer,
+  };
 }
 
 export async function GET() {
@@ -95,23 +101,23 @@ export async function POST(req: Request) {
     }
 
     const formData = await req.formData();
-    const fileValue = formData.get('imageFile');
-    if (!isUploadedImageFile(fileValue) || fileValue.size === 0) {
+    const uploadedFile = getUploadedImageFile(formData.get('imageFile'));
+    if (!uploadedFile || uploadedFile.size === 0) {
       return json({ ok: false, error: 'No image file was uploaded. Use form field imageFile.' }, 400);
     }
 
-    if (fileValue.size > MAX_IMAGE_BYTES) {
+    if (uploadedFile.size > MAX_IMAGE_BYTES) {
       return json({ ok: false, error: 'Image is too large. Maximum upload size is 4 MB. Please compress or resize it first.' }, 413);
     }
 
-    const buffer = Buffer.from(await fileValue.arrayBuffer());
+    const buffer = Buffer.from(await uploadedFile.arrayBuffer());
     const detectedMimeType = detectImageMimeType(buffer);
     if (!detectedMimeType || !SUPPORTED_IMAGE_TYPES.has(detectedMimeType)) {
       return json({ ok: false, error: 'Unsupported image file. Please upload JPG, PNG, WEBP, or GIF.' }, 400);
     }
 
     const bucket = adminStorageBucket();
-    const originalName = safeFilename(fileValue.name || 'marketing-image');
+    const originalName = safeFilename(uploadedFile.name || 'marketing-image');
     const basename = originalName.replace(/\.(jpe?g|png|webp|gif)$/i, '') || 'marketing-image';
     const extension = resolveExtension(originalName, detectedMimeType);
     const objectName = `marketing-campaign-images/${new Date().toISOString().slice(0, 10)}/${Date.now()}-${basename}${extension}`;
@@ -134,7 +140,7 @@ export async function POST(req: Request) {
       imageUrl: firebaseDownloadUrl(bucket.name, objectName, downloadToken),
       imagePath: objectName,
       contentType: detectedMimeType,
-      sizeBytes: fileValue.size,
+      sizeBytes: uploadedFile.size,
       maxSizeMb: 4,
       version: '2026-05-24-safe-blob-upload',
     });
