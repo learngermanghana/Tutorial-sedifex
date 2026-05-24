@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, Bell, CheckCircle2, Clock3, Download, PackageCheck, PackageOpen, Search, ShoppingCart, Truck, XCircle } from 'lucide-react';
 
 type OrderItem = {
@@ -53,6 +53,7 @@ type OrderRecord = {
 };
 
 type Bucket = 'all' | 'new' | 'accepted' | 'preparing' | 'out_for_delivery' | 'delivered' | 'problem' | 'delayed';
+type StatusAction = 'received' | 'preparing' | 'out_for_delivery' | 'delivered';
 
 const POLL_MS = 20000;
 const BUCKET_LABELS: Record<Bucket, string> = {
@@ -64,6 +65,13 @@ const BUCKET_LABELS: Record<Bucket, string> = {
   delivered: 'Delivered',
   problem: 'Problem',
   delayed: 'Delayed',
+};
+
+const STATUS_ACTION_LABELS: Record<StatusAction, string> = {
+  received: 'Received',
+  preparing: 'Preparing',
+  out_for_delivery: 'Out for delivery',
+  delivered: 'Delivered',
 };
 
 function clean(value: unknown, fallback = '') {
@@ -237,45 +245,72 @@ export default function OrdersPage() {
   const [loading, setLoading] = useState(true);
   const [activeBucket, setActiveBucket] = useState<Bucket>('all');
   const [query, setQuery] = useState('');
+  const [updatingOrderId, setUpdatingOrderId] = useState<string | null>(null);
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const knownIds = useRef<Set<string>>(new Set());
+
+  const fetchOrders = useCallback(async (initial = false) => {
+    try {
+      const res = await fetch('/api/admin/firestore/integration-orders?limit=100', { cache: 'no-store' });
+      const raw = await res.text();
+      let json: { ok?: boolean; data?: OrderRecord[]; error?: string } | null = null;
+      try { json = JSON.parse(raw); } catch {}
+      if (!res.ok || !json?.ok) throw new Error(json?.error || raw || 'Failed to load orders');
+
+      const data: OrderRecord[] = (json.data || []).sort((a, b) => orderTime(b) - orderTime(a));
+      if (!initial) {
+        const newOrders = data.filter((order) => order.id && !knownIds.current.has(order.id));
+        if (newOrders.length > 0) alert(`🔔 ${newOrders.length} new order${newOrders.length > 1 ? 's' : ''} received.`);
+      }
+
+      knownIds.current = new Set(data.map((order) => order.id).filter(Boolean));
+      setOrders(data);
+      setError(null);
+      setLoading(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to load orders');
+      setLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
     let mounted = true;
-    const fetchOrders = async (initial = false) => {
-      try {
-        const res = await fetch('/api/admin/firestore/integration-orders?limit=100', { cache: 'no-store' });
-        const raw = await res.text();
-        let json: { ok?: boolean; data?: OrderRecord[]; error?: string } | null = null;
-        try { json = JSON.parse(raw); } catch {}
-        if (!res.ok || !json?.ok) throw new Error(json?.error || raw || 'Failed to load orders');
-
-        const data: OrderRecord[] = (json.data || []).sort((a, b) => orderTime(b) - orderTime(a));
-        if (!initial) {
-          const newOrders = data.filter((order) => order.id && !knownIds.current.has(order.id));
-          if (newOrders.length > 0) alert(`🔔 ${newOrders.length} new order${newOrders.length > 1 ? 's' : ''} received.`);
-        }
-
-        knownIds.current = new Set(data.map((order) => order.id).filter(Boolean));
-        if (mounted) {
-          setOrders(data);
-          setError(null);
-          setLoading(false);
-        }
-      } catch (e) {
-        if (mounted) {
-          setError(e instanceof Error ? e.message : 'Failed to load orders');
-          setLoading(false);
-        }
-      }
+    const load = async (initial = false) => {
+      if (!mounted) return;
+      await fetchOrders(initial);
     };
-
-    fetchOrders(true);
-    const timer = setInterval(() => fetchOrders(false), POLL_MS);
+    void load(true);
+    const timer = setInterval(() => void load(false), POLL_MS);
     return () => {
       mounted = false;
       clearInterval(timer);
     };
-  }, []);
+  }, [fetchOrders]);
+
+  const updateOrderStatus = async (order: OrderRecord, action: StatusAction) => {
+    const ok = window.confirm(`Mark this order as ${STATUS_ACTION_LABELS[action]}? This will update the order on behalf of the store.`);
+    if (!ok) return;
+
+    setUpdatingOrderId(`${order.id}-${action}`);
+    setStatusMessage(null);
+    try {
+      const res = await fetch('/api/admin/firestore/integration-orders/status', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ orderId: order.id, storeId: order.storeId || '', action }),
+      });
+      const raw = await res.text();
+      let json: { ok?: boolean; error?: string; label?: string } | null = null;
+      try { json = JSON.parse(raw); } catch {}
+      if (!res.ok || !json?.ok) throw new Error(json?.error || raw || 'Unable to update order status.');
+      setStatusMessage(`Updated ${order.id} to ${json.label || STATUS_ACTION_LABELS[action]}.`);
+      await fetchOrders(true);
+    } catch (e) {
+      setStatusMessage(e instanceof Error ? e.message : 'Unable to update order status.');
+    } finally {
+      setUpdatingOrderId(null);
+    }
+  };
 
   const stats = useMemo(() => {
     const initial = { all: orders.length, new: 0, accepted: 0, preparing: 0, out_for_delivery: 0, delivered: 0, problem: 0, delayed: 0 } as Record<Bucket, number>;
@@ -338,7 +373,7 @@ export default function OrdersPage() {
             </div>
             <h2 className="mt-5 max-w-4xl text-3xl font-bold tracking-tight sm:text-4xl">Track every Sedifex Market order until delivery.</h2>
             <p className="mt-4 max-w-3xl text-sm leading-7 text-slate-300">
-              Monitor paid orders, store acceptance, preparation, delivery progress, delayed orders, and problem cases. This page refreshes every {POLL_MS / 1000} seconds.
+              Monitor paid orders, store acceptance, preparation, delivery progress, delayed orders, and problem cases. Admin can update status on behalf of stores.
             </p>
           </div>
           <button type="button" onClick={downloadCsv} className="inline-flex items-center justify-center gap-2 rounded-2xl bg-white px-4 py-3 text-sm font-bold text-slate-950 hover:bg-slate-100">
@@ -353,6 +388,8 @@ export default function OrdersPage() {
         <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"><p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Delayed</p><p className="mt-2 text-2xl font-bold text-slate-950">{stats.delayed}</p><p className="mt-1 text-xs text-rose-600">Requires follow-up</p></div>
         <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"><p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Shown value</p><p className="mt-2 text-2xl font-bold text-slate-950">GHS {revenue.toFixed(2)}</p><p className="mt-1 text-xs text-slate-500">Current filter total</p></div>
       </section>
+
+      {statusMessage ? <p className="rounded-2xl border border-indigo-200 bg-indigo-50 p-4 text-sm font-semibold text-indigo-800">{statusMessage}</p> : null}
 
       <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
@@ -381,8 +418,8 @@ export default function OrdersPage() {
 
         {!loading && !error ? (
           <div className="mt-5 overflow-hidden rounded-2xl border border-slate-200">
-            <div className="hidden grid-cols-[1.1fr_1fr_0.85fr_0.9fr_1fr_0.9fr] gap-4 border-b border-slate-200 bg-slate-50 px-4 py-3 text-xs font-bold uppercase tracking-wide text-slate-500 xl:grid">
-              <span>Buyer</span><span>Store</span><span>Amount</span><span>Status</span><span>Items</span><span>Timing</span>
+            <div className="hidden grid-cols-[1.05fr_0.95fr_0.75fr_0.9fr_0.95fr_0.8fr_1.05fr] gap-4 border-b border-slate-200 bg-slate-50 px-4 py-3 text-xs font-bold uppercase tracking-wide text-slate-500 xl:grid">
+              <span>Buyer</span><span>Store</span><span>Amount</span><span>Status</span><span>Items</span><span>Timing</span><span>Admin action</span>
             </div>
             <div className="divide-y divide-slate-100">
               {filtered.length === 0 ? <div className="p-8 text-center text-sm text-slate-500">No orders match this filter.</div> : null}
@@ -390,8 +427,9 @@ export default function OrdersPage() {
                 const bucket = bucketFor(order);
                 const delayed = isDelayed(order);
                 const shownBucket: Bucket = delayed && bucket !== 'problem' && bucket !== 'delivered' ? 'delayed' : bucket;
+                const statusActions: StatusAction[] = bucket === 'delivered' ? ['received', 'preparing', 'out_for_delivery'] : ['received', 'preparing', 'out_for_delivery', 'delivered'];
                 return (
-                  <div key={order.id} className="grid gap-4 px-4 py-4 text-sm xl:grid-cols-[1.1fr_1fr_0.85fr_0.9fr_1fr_0.9fr] xl:items-center">
+                  <div key={order.id} className="grid gap-4 px-4 py-4 text-sm xl:grid-cols-[1.05fr_0.95fr_0.75fr_0.9fr_0.95fr_0.8fr_1.05fr] xl:items-center">
                     <div className="min-w-0">
                       <p className="truncate font-semibold text-slate-950">{buyerName(order)}</p>
                       <p className="truncate text-xs text-slate-500">{buyerPhone(order)} · {buyerEmail(order)}</p>
@@ -428,6 +466,19 @@ export default function OrdersPage() {
                       <p className="font-semibold text-slate-700">{ageLabel(order)}</p>
                       <p className="text-xs text-slate-500">{formatDate(order.paymentUpdatedAt || order.updatedAt || order.updateTime || order.createdAt || order.createTime)}</p>
                       {order.deliveredAt ? <p className="mt-1 text-xs text-emerald-600">Delivered: {formatDate(order.deliveredAt)}</p> : null}
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {statusActions.map((action) => (
+                        <button
+                          key={`${order.id}-${action}`}
+                          type="button"
+                          disabled={Boolean(updatingOrderId)}
+                          onClick={() => updateOrderStatus(order, action)}
+                          className={`rounded-full border px-2.5 py-1 text-[11px] font-bold transition disabled:cursor-not-allowed disabled:opacity-50 ${action === 'delivered' ? 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100' : action === 'out_for_delivery' ? 'border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100' : action === 'preparing' ? 'border-purple-200 bg-purple-50 text-purple-700 hover:bg-purple-100' : 'border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100'}`}
+                        >
+                          {updatingOrderId === `${order.id}-${action}` ? 'Updating…' : STATUS_ACTION_LABELS[action]}
+                        </button>
+                      ))}
                     </div>
                   </div>
                 );
