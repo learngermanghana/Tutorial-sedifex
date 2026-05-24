@@ -17,15 +17,28 @@ function cleanPrivateKey(value: string) {
   return value.trim().replace(/^"|"$/g, '').replace(/\\n/g, '\n');
 }
 
-function getCredentialConfig() {
-  const serviceAccountJson = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
+function parseServiceAccountJson(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    throw new Error('FIREBASE_SERVICE_ACCOUNT_JSON is empty. Paste the full Firebase service account JSON or use FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL, and FIREBASE_PRIVATE_KEY instead.');
+  }
 
-  if (serviceAccountJson) {
-    const serviceAccount = JSON.parse(serviceAccountJson) as {
+  try {
+    return JSON.parse(trimmed) as {
       project_id?: string;
       client_email?: string;
       private_key?: string;
     };
+  } catch {
+    throw new Error('FIREBASE_SERVICE_ACCOUNT_JSON is not valid JSON. Re-copy the full service account JSON from Firebase and make sure it was not cut off.');
+  }
+}
+
+function getCredentialConfig() {
+  const serviceAccountJson = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
+
+  if (serviceAccountJson) {
+    const serviceAccount = parseServiceAccountJson(serviceAccountJson);
 
     if (!serviceAccount.project_id || !serviceAccount.client_email || !serviceAccount.private_key) {
       throw new Error('FIREBASE_SERVICE_ACCOUNT_JSON is missing project_id, client_email, or private_key.');
@@ -58,7 +71,7 @@ function getConfiguredProjectId() {
   if (!process.env.FIREBASE_SERVICE_ACCOUNT_JSON) return null;
 
   try {
-    const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON) as { project_id?: string };
+    const serviceAccount = parseServiceAccountJson(process.env.FIREBASE_SERVICE_ACCOUNT_JSON);
     return serviceAccount.project_id || null;
   } catch {
     return null;
