@@ -153,7 +153,9 @@ function storeLabel(order: OrderRecord) {
 }
 
 function statusText(order: OrderRecord) {
-  const parts = [order.orderStatus, order.fulfillmentStatus, order.deliveryStatus, order.paymentStatus].map(clean).filter(Boolean);
+  const parts = [order.orderStatus, order.fulfillmentStatus, order.deliveryStatus, order.paymentStatus]
+    .map((value) => clean(value))
+    .filter(Boolean);
   return parts.length ? parts.join(' / ') : 'No status';
 }
 
@@ -225,7 +227,7 @@ function matchesSearch(order: OrderRecord, query: string) {
     order.source,
     statusText(order),
     ...(order.items || []).flatMap((item) => [item.name, item.productName, item.itemName, item.serviceName]),
-  ].map(clean).join(' ').toLowerCase();
+  ].map((value) => clean(value)).join(' ').toLowerCase();
   return haystack.includes(query.toLowerCase());
 }
 
