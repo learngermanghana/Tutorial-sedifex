@@ -17,6 +17,7 @@ import {
   Webhook,
   Zap,
 } from 'lucide-react';
+import { DashboardOrderFollowUp } from '../../components/admin/DashboardOrderFollowUp';
 import { SectionCard, StatCard, StatusBadge } from '../../components/admin/ui';
 import { getFirebaseEnvStatus, listFirestoreDocuments } from '../../lib/firebase-admin';
 
@@ -135,7 +136,7 @@ function isRecent(record: DashboardRecord, days = 7) {
 }
 
 function moneyAmount(order: DashboardRecord) {
-  const candidates = [order.finalTotal, order.amountPaid, order.amount, order.total, order.grandTotal];
+  const candidates = [order.finalTotal, order.final_total, order.amountPaid, order.amount, order.total, order.grandTotal];
   const value = candidates.find((item) => typeof item === 'number');
   if (typeof value === 'number') return value;
   if (typeof order.amountMinor === 'number') return order.amountMinor / 100;
@@ -147,7 +148,14 @@ function formatMoney(value: number) {
 }
 
 function orderStatus(order: DashboardRecord) {
-  return getText(order, ['paymentStatus', 'orderStatus', 'status'], '').toLowerCase();
+  return [order.paymentStatus, order.payment_status, order.orderStatus, order.order_status, order.fulfillmentStatus, order.deliveryStatus, order.status]
+    .map((value) => (typeof value === 'string' ? value.trim().toLowerCase() : ''))
+    .filter(Boolean)
+    .join(' ');
+}
+
+function isPaidOrder(order: DashboardRecord) {
+  return /paid|success|successful|confirmed/.test(orderStatus(order));
 }
 
 function isFailedOrder(order: DashboardRecord) {
@@ -155,10 +163,43 @@ function isFailedOrder(order: DashboardRecord) {
   return ['failed', 'error', 'cancelled', 'canceled', 'declined', 'abandoned'].some((word) => status.includes(word));
 }
 
+function orderBucket(order: DashboardRecord): 'new' | 'accepted' | 'preparing' | 'out_for_delivery' | 'delivered' | 'problem' | 'delayed' {
+  const status = orderStatus(order).replace(/\s+/g, '_');
+  if (/cancel|refund|failed|problem|dispute|delivery_failed/.test(status)) return 'problem';
+  if (/delivered|completed/.test(status) || order.deliveredAt) return 'delivered';
+  if (/out_for_delivery|in_transit/.test(status)) return 'out_for_delivery';
+  if (/prepar|pack|processing/.test(status)) return 'preparing';
+  if (/accepted|confirmed_by_store|ready_for_pickup/.test(status)) return 'accepted';
+  if (/paid|success|successful|confirmed/.test(status)) return 'new';
+  return 'new';
+}
+
+function isDelayedOrder(order: DashboardRecord) {
+  const bucket = orderBucket(order);
+  if (bucket === 'delivered' || bucket === 'problem') return false;
+  const time = recordTime(order);
+  if (!time) return false;
+  const hours = (Date.now() - time) / 36e5;
+  if (bucket === 'new') return hours >= 1;
+  if (bucket === 'accepted' || bucket === 'preparing') return hours >= 6;
+  if (bucket === 'out_for_delivery') return hours >= 12;
+  return hours >= 24;
+}
+
+function ageLabel(record: DashboardRecord) {
+  const time = recordTime(record);
+  if (!time) return 'Unknown age';
+  const minutes = Math.max(0, Math.round((Date.now() - time) / 60000));
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 48) return `${hours}h ago`;
+  return `${Math.round(hours / 24)}d ago`;
+}
+
 function hasImage(item: DashboardRecord) {
   const stringFields = ['image', 'imageUrl', 'imageURL', 'photo', 'photoUrl', 'thumbnail', 'coverImage', 'mainImage'];
   if (stringFields.some((field) => typeof item[field] === 'string' && String(item[field]).trim())) return true;
-  const arrays = [item.images, item.gallery, item.photos];
+  const arrays = [item.images, item.gallery, item.photos, item.imageUrls];
   return arrays.some((value) => Array.isArray(value) && value.length > 0);
 }
 
@@ -173,11 +214,11 @@ function hasPrice(item: DashboardRecord) {
 }
 
 function hasCategory(item: DashboardRecord) {
-  return Boolean(getText(item, ['category', 'categoryName', 'categoryId', 'type', 'itemType', 'serviceCategory', 'courseCategory'], ''));
+  return Boolean(getText(item, ['category', 'categoryName', 'categoryId', 'categoryKey', 'type', 'itemType', 'listingType', 'serviceCategory', 'courseCategory'], ''));
 }
 
 function marketVisible(item: DashboardRecord) {
-  if (item.marketplaceVisible === true || item.showOnMarket === true || item.isPublished === true || item.active === true) return true;
+  if (item.marketplaceVisible === true || item.showOnMarket === true || item.isPublished === true || item.active === true || item.isMarketplaceVisible === true) return true;
   const status = getText(item, ['status', 'visibility', 'state'], '').toLowerCase();
   return ['active', 'published', 'visible', 'live'].includes(status);
 }
@@ -185,7 +226,7 @@ function marketVisible(item: DashboardRecord) {
 function checkoutLooksConfigured(store: DashboardRecord) {
   const directFields = ['merchantId', 'merchantToken', 'paystackSubaccount', 'paystackSubaccountCode', 'checkoutEnabled'];
   if (directFields.some((field) => Boolean(store[field]))) return true;
-  const payment = asRecord(store.payment) || asRecord(store.payments) || asRecord(store.checkout) || asRecord(store.billing);
+  const payment = asRecord(store.payment) || asRecord(store.payments) || asRecord(store.checkout) || asRecord(store.billing) || asRecord(store.paymentRouting);
   if (!payment) return false;
   return Object.values(payment).some((value) => value === true || (typeof value === 'string' && value.trim().length > 0));
 }
@@ -218,9 +259,12 @@ async function getDashboardData(): Promise<DashboardData> {
     };
   }
 
-  const [stores, orders, products, services, courses, catalogItems, deliveries] = await Promise.all([
+  const [stores, storeSettings, orders, publicListings, publicProducts, products, services, courses, catalogItems, deliveries] = await Promise.all([
+    readCollection('stores', 100),
     readCollection('storeSettings', 100),
     readCollection('integrationOrders', 100),
+    readCollection('publicListings', 150),
+    readCollection('publicProducts', 150),
     readCollection('products', 100),
     readCollection('services', 100),
     readCollection('courses', 100),
@@ -229,16 +273,18 @@ async function getDashboardData(): Promise<DashboardData> {
   ]);
 
   const collectionErrors: Record<string, string> = {};
-  Object.entries({ storeSettings: stores, integrationOrders: orders, products, services, courses, catalogItems, webhookDeliveries: deliveries }).forEach(([key, result]) => {
+  Object.entries({ stores, storeSettings, integrationOrders: orders, publicListings, publicProducts, products, services, courses, catalogItems, webhookDeliveries: deliveries }).forEach(([key, result]) => {
     if (!result.ok && result.error) collectionErrors[key] = result.error;
   });
 
+  const storeDocs = stores.documents.length > 0 ? stores.documents : storeSettings.documents;
+
   return {
-    connected: stores.ok,
-    error: stores.error,
-    stores: stores.documents,
+    connected: stores.ok || storeSettings.ok,
+    error: stores.error && storeSettings.error ? stores.error : null,
+    stores: storeDocs,
     orders: orders.documents,
-    catalogItems: [...products.documents, ...services.documents, ...courses.documents, ...catalogItems.documents],
+    catalogItems: [...publicListings.documents, ...publicProducts.documents, ...products.documents, ...services.documents, ...courses.documents, ...catalogItems.documents],
     deliveries: deliveries.documents,
     collectionErrors,
   };
@@ -259,7 +305,7 @@ const quickActions = [
   },
   {
     title: 'Monitor orders',
-    description: 'Check paid, pending, and failed marketplace or website checkout orders.',
+    description: 'Use admin buttons to mark orders received, preparing, out for delivery, or delivered.',
     href: '/admin/orders',
     icon: ShoppingBag,
   },
@@ -284,6 +330,9 @@ export default async function AdminDashboardPage() {
   const recentlyUpdatedStores = stores.filter((store) => isRecent(store, 7)).length;
   const ordersToday = orders.filter(isToday);
   const failedOrders = orders.filter(isFailedOrder);
+  const paidOrders = orders.filter(isPaidOrder);
+  const pendingDeliveryOrders = orders.filter((order) => !['delivered', 'problem'].includes(orderBucket(order)) && isPaidOrder(order));
+  const delayedOrders = pendingDeliveryOrders.filter(isDelayedOrder);
   const revenueToday = ordersToday.reduce((sum, order) => sum + moneyAmount(order), 0);
   const catalogMissingImage = catalogItems.filter((item) => !hasImage(item)).length;
   const catalogMissingPrice = catalogItems.filter((item) => !hasPrice(item)).length;
@@ -293,6 +342,35 @@ export default async function AdminDashboardPage() {
     const status = getText(delivery, ['status', 'deliveryStatus', 'state'], '').toLowerCase();
     return ['failed', 'error', 'retrying'].some((word) => status.includes(word));
   }).length;
+
+  const followUpOrders = [...pendingDeliveryOrders]
+    .sort((a, b) => {
+      const delayedDiff = Number(isDelayedOrder(b)) - Number(isDelayedOrder(a));
+      if (delayedDiff !== 0) return delayedDiff;
+      return (recordTime(a) || 0) - (recordTime(b) || 0);
+    })
+    .slice(0, 6)
+    .map((order) => {
+      const bucket = isDelayedOrder(order) ? 'delayed' : orderBucket(order);
+      const customer = asRecord(order.customer);
+      return {
+        id: String(order.id || ''),
+        storeId: getText(order, ['storeId', 'store_id', 'merchantId', 'merchant_id'], ''),
+        storeName: getText(order, ['storeName', 'merchantName'], 'Unknown store'),
+        buyerName: getText(order, ['customerName'], customer ? getText(customer, ['name'], 'Unknown buyer') : 'Unknown buyer'),
+        amount: formatMoney(moneyAmount(order)),
+        status: orderStatus(order) || 'No status',
+        bucket,
+        age: ageLabel(order),
+      };
+    });
+
+  const qualityProblems = [
+    { label: 'Missing image', value: catalogMissingImage, description: 'Products without photos reduce trust and clicks.', href: '/admin/products' },
+    { label: 'Missing price', value: catalogMissingPrice, description: 'Products without prices should not be promoted.', href: '/admin/products' },
+    { label: 'Missing category', value: catalogMissingCategory, description: 'Categories help browsing, emails, and future ads.', href: '/admin/products' },
+    { label: 'Not visible/live', value: Math.max(catalogItems.length - marketVisibleItems, 0), description: 'Items not visible cannot help the marketplace sell.', href: '/admin/products' },
+  ];
 
   const metrics = [
     {
@@ -306,9 +384,9 @@ export default async function AdminDashboardPage() {
       delta: dashboard.connected ? formatMoney(revenueToday) : 'Database not ready',
     },
     {
-      label: 'Checkout reviews',
-      value: dashboard.connected ? String(checkoutReviewCount) : '—',
-      delta: 'Stores needing setup check',
+      label: 'Pending delivery',
+      value: dashboard.connected ? String(pendingDeliveryOrders.length) : '—',
+      delta: `${delayedOrders.length} delayed orders`,
     },
     {
       label: 'Market-ready catalog',
@@ -325,6 +403,15 @@ export default async function AdminDashboardPage() {
           href: '/admin/settings',
           tone: 'red',
           icon: Database,
+        }
+      : null,
+    delayedOrders.length > 0
+      ? {
+          title: `${delayedOrders.length} delayed orders need follow-up`,
+          description: 'Use the dashboard order buttons or open Orders to mark progress on behalf of lazy stores.',
+          href: '/admin/orders',
+          tone: 'red',
+          icon: ShoppingBag,
         }
       : null,
     failedOrders.length > 0
@@ -391,6 +478,7 @@ export default async function AdminDashboardPage() {
     { label: 'Stores without Google Shopping', value: Math.max(stores.length - googleShoppingConnected, 0), href: '/admin/stores', tone: 'slate' as const },
     { label: 'Stores without auto sync', value: Math.max(stores.length - autoSyncEnabled, 0), href: '/admin/stores', tone: 'slate' as const },
     { label: 'Failed orders', value: failedOrders.length, href: '/admin/orders', tone: failedOrders.length > 0 ? ('red' as const) : ('green' as const) },
+    { label: 'Pending delivery', value: pendingDeliveryOrders.length, href: '/admin/orders', tone: pendingDeliveryOrders.length > 0 ? ('yellow' as const) : ('green' as const) },
     { label: 'Catalog missing image', value: catalogMissingImage, href: '/admin/products', tone: catalogMissingImage > 0 ? ('yellow' as const) : ('green' as const) },
     { label: 'Catalog missing price', value: catalogMissingPrice, href: '/admin/products', tone: catalogMissingPrice > 0 ? ('yellow' as const) : ('green' as const) },
   ];
@@ -427,6 +515,10 @@ export default async function AdminDashboardPage() {
                 <StatusBadge tone="green">{dashboard.connected ? formatMoney(revenueToday) : '—'}</StatusBadge>
               </div>
               <div className="flex items-center justify-between gap-3">
+                <span>Pending delivery</span>
+                <StatusBadge tone={pendingDeliveryOrders.length > 0 ? 'yellow' : 'green'}>{pendingDeliveryOrders.length}</StatusBadge>
+              </div>
+              <div className="flex items-center justify-between gap-3">
                 <span>Urgent alerts</span>
                 <StatusBadge tone={alerts.some((alert) => alert.tone === 'red') ? 'red' : alerts.length > 0 ? 'yellow' : 'green'}>
                   {alerts.length}
@@ -451,6 +543,24 @@ export default async function AdminDashboardPage() {
 
       <section className="grid gap-6 xl:grid-cols-[1.25fr_0.75fr]">
         <div className="space-y-6">
+          <SectionCard title="Order follow-up center">
+            <DashboardOrderFollowUp orders={followUpOrders} />
+          </SectionCard>
+
+          <SectionCard title="Product quality checker">
+            <div className="grid gap-4 md:grid-cols-2">
+              {qualityProblems.map((problem) => (
+                <Link key={problem.label} href={problem.href} className="rounded-2xl border border-slate-200 bg-slate-50 p-4 transition hover:border-indigo-200 hover:bg-indigo-50/60">
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-sm font-bold text-slate-950">{problem.label}</p>
+                    <StatusBadge tone={problem.value > 0 ? 'yellow' : 'green'}>{problem.value}</StatusBadge>
+                  </div>
+                  <p className="mt-2 text-sm leading-6 text-slate-600">{problem.description}</p>
+                </Link>
+              ))}
+            </div>
+          </SectionCard>
+
           <SectionCard title="What needs attention first">
             <div className="grid gap-4 md:grid-cols-2">
               {alerts.map((alert) => {
@@ -569,21 +679,21 @@ export default async function AdminDashboardPage() {
                   <Store className="h-4 w-4 text-indigo-600" />
                   Stores
                 </div>
-                <p className="mt-2 leading-6">Reads storeSettings for store health, Google Shopping, and auto sync checks.</p>
+                <p className="mt-2 leading-6">Reads stores or storeSettings for store health, Google Shopping, and auto sync checks.</p>
               </div>
               <div className="rounded-2xl bg-slate-50 p-4">
                 <div className="flex items-center gap-2 font-semibold text-slate-950">
                   <ReceiptText className="h-4 w-4 text-indigo-600" />
                   Orders
                 </div>
-                <p className="mt-2 leading-6">Reads integrationOrders for today&apos;s orders, revenue, and failed checkout signals.</p>
+                <p className="mt-2 leading-6">Reads integrationOrders for today&apos;s orders, revenue, failed checkout signals, and admin delivery follow-up.</p>
               </div>
               <div className="rounded-2xl bg-slate-50 p-4">
                 <div className="flex items-center gap-2 font-semibold text-slate-950">
                   <PackageSearch className="h-4 w-4 text-indigo-600" />
                   Catalog
                 </div>
-                <p className="mt-2 leading-6">Checks products, services, courses, and catalogItems when those collections exist.</p>
+                <p className="mt-2 leading-6">Checks publicListings, publicProducts, products, services, courses, and catalogItems when those collections exist.</p>
               </div>
             </div>
           </SectionCard>
@@ -592,8 +702,8 @@ export default async function AdminDashboardPage() {
             <SectionCard title="Optional collection notices">
               <div className="space-y-2 text-xs leading-5 text-slate-500">
                 {Object.entries(dashboard.collectionErrors)
-                  .filter(([key]) => key !== 'storeSettings')
-                  .slice(0, 4)
+                  .filter(([key]) => key !== 'stores' && key !== 'storeSettings')
+                  .slice(0, 6)
                   .map(([key, error]) => (
                     <p key={key} className="rounded-xl bg-slate-50 p-3">
                       <span className="font-semibold text-slate-700">{key}:</span> {error}
