@@ -34,44 +34,53 @@ function storagePublicUrl(bucketName: string, objectName: string) {
 }
 
 export async function POST(request: Request) {
-  const env = getFirebaseEnvStatus();
-  if (!env.ready) return NextResponse.json({ error: 'Firebase environment variables are not ready.' }, { status: 500 });
+  try {
+    const env = getFirebaseEnvStatus();
+    if (!env.ready) return NextResponse.json({ error: 'Firebase environment variables are not ready.' }, { status: 500 });
 
-  const formData = await request.formData();
-  const fileValue = formData.get('imageFile');
-  const advertId = typeof formData.get('advertId') === 'string' && String(formData.get('advertId')).trim() ? String(formData.get('advertId')).trim() : 'new';
+    const formData = await request.formData();
+    const fileValue = formData.get('imageFile');
+    const advertId = typeof formData.get('advertId') === 'string' && String(formData.get('advertId')).trim() ? String(formData.get('advertId')).trim() : 'new';
 
-  if (!(fileValue instanceof File) || fileValue.size === 0) {
-    return NextResponse.json({ error: 'Choose an image first.' }, { status: 400 });
+    if (!(fileValue instanceof File) || fileValue.size === 0) {
+      return NextResponse.json({ error: 'Choose an image first.' }, { status: 400 });
+    }
+    if (fileValue.size > MAX_IMAGE_BYTES) {
+      return NextResponse.json({ error: 'Advert image is too large. Maximum upload size is 5 MB.' }, { status: 413 });
+    }
+
+    const buffer = Buffer.from(await fileValue.arrayBuffer());
+    const detectedMimeType = detectImageMimeType(buffer);
+    if (!detectedMimeType || !SUPPORTED_IMAGE_TYPES.has(detectedMimeType)) {
+      return NextResponse.json({ error: 'Unsupported image file. Upload JPG, PNG, WEBP, or GIF.' }, { status: 400 });
+    }
+
+    const originalName = safeFilename(fileValue.name || 'advert-image');
+    const basename = originalName.replace(/\.(jpe?g|png|webp|gif)$/i, '') || 'advert-image';
+    const extension = resolveExtension(originalName, detectedMimeType);
+    const objectName = `marketplace-adverts/${advertId}/${Date.now()}-${basename}${extension}`;
+    const bucket = adminStorageBucket();
+    const target = bucket.file(objectName);
+
+    await target.save(buffer, {
+      resumable: false,
+      metadata: {
+        contentType: detectedMimeType,
+        cacheControl: 'public,max-age=31536000,immutable',
+      },
+    });
+
+    return NextResponse.json({
+      success: true,
+      imageUrl: storagePublicUrl(bucket.name, objectName),
+      imagePath: objectName,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error || 'Image upload failed.');
+    const isTruncated = /truncated/i.test(message);
+    return NextResponse.json(
+      { error: isTruncated ? 'Upload request was truncated before it reached the server. Please retry with a smaller image (under 2 MB) or convert to JPG/WEBP.' : message },
+      { status: isTruncated ? 413 : 500 },
+    );
   }
-  if (fileValue.size > MAX_IMAGE_BYTES) {
-    return NextResponse.json({ error: 'Advert image is too large. Maximum upload size is 5 MB.' }, { status: 413 });
-  }
-
-  const buffer = Buffer.from(await fileValue.arrayBuffer());
-  const detectedMimeType = detectImageMimeType(buffer);
-  if (!detectedMimeType || !SUPPORTED_IMAGE_TYPES.has(detectedMimeType)) {
-    return NextResponse.json({ error: 'Unsupported image file. Upload JPG, PNG, WEBP, or GIF.' }, { status: 400 });
-  }
-
-  const originalName = safeFilename(fileValue.name || 'advert-image');
-  const basename = originalName.replace(/\.(jpe?g|png|webp|gif)$/i, '') || 'advert-image';
-  const extension = resolveExtension(originalName, detectedMimeType);
-  const objectName = `marketplace-adverts/${advertId}/${Date.now()}-${basename}${extension}`;
-  const bucket = adminStorageBucket();
-  const target = bucket.file(objectName);
-
-  await target.save(buffer, {
-    resumable: false,
-    metadata: {
-      contentType: detectedMimeType,
-      cacheControl: 'public,max-age=31536000,immutable',
-    },
-  });
-
-  return NextResponse.json({
-    success: true,
-    imageUrl: storagePublicUrl(bucket.name, objectName),
-    imagePath: objectName,
-  });
 }
