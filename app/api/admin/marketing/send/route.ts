@@ -11,6 +11,7 @@ type Recipient = {
 };
 
 type RequestBody = {
+  audience?: string;
   subject?: string;
   html?: string;
   text?: string;
@@ -65,6 +66,7 @@ function plainTextFromHtml(html: string) {
 function sedifexMarketingConfig() {
   const webAppUrl = (
     process.env.SEDIFEX_MARKETING_APPS_SCRIPT_URL ||
+    process.env.SEDIFEX_MARKETING_APPS_SCRIPT_URL ||
     process.env.MARKETING_APPS_SCRIPT_WEBHOOK_URL ||
     process.env.APPS_SCRIPT_MARKETING_WEBHOOK_URL ||
     ''
@@ -73,6 +75,7 @@ function sedifexMarketingConfig() {
   const sharedToken = (
     process.env.SEDIFEX_MARKETING_SHARED_TOKEN ||
     process.env.MARKETING_APPS_SCRIPT_TOKEN ||
+    process.env.MARKETING_APPS_SCRIPT_TOKEN ||
     process.env.SEDIFEX_SHARED_TOKEN ||
     ''
   ).trim();
@@ -80,10 +83,14 @@ function sedifexMarketingConfig() {
   return {
     webAppUrl,
     sharedToken,
-    fromEmail: (process.env.SEDIFEX_MARKETING_FROM_EMAIL || 'sedifexbiz@gmail.com').trim(),
-    fromName: (process.env.SEDIFEX_MARKETING_FROM_NAME || 'Sedifex Market').trim(),
-    replyTo: (process.env.SEDIFEX_MARKETING_REPLY_TO || process.env.SEDIFEX_MARKETING_FROM_EMAIL || 'sedifexbiz@gmail.com').trim(),
+    fromEmail: (process.env.SEDIFEX_MARKETING_FROM_EMAIL || process.env.SEDIFEX_FROM_EMAIL || 'sedifexbiz@gmail.com').trim(),
+    fromName: (process.env.SEDIFEX_MARKETING_FROM_NAME || 'Sedifex Team').trim(),
+    replyTo: (process.env.SEDIFEX_MARKETING_REPLY_TO || process.env.SEDIFEX_MARKETING_FROM_EMAIL || process.env.SEDIFEX_FROM_EMAIL || 'sedifexbiz@gmail.com').trim(),
   };
+}
+
+function responseSnippet(value: string, max = 3000) {
+  return value.length > max ? `${value.slice(0, max)}\n…[truncated ${value.length - max} chars]` : value;
 }
 
 export async function POST(req: Request) {
@@ -97,13 +104,32 @@ export async function POST(req: Request) {
   const html = cleanText(body?.html);
   const text = cleanText(body?.text) || plainTextFromHtml(html);
   const recipients = sanitizeRecipients(body?.recipients);
+  const audience = cleanText(body?.audience) || 'both';
   const config = sedifexMarketingConfig();
 
-  if (!config.webAppUrl) return NextResponse.json({ ok: false, error: 'SEDIFEX_MARKETING_APPS_SCRIPT_URL is not configured.' }, { status: 500 });
-  if (!config.sharedToken) return NextResponse.json({ ok: false, error: 'SEDIFEX_MARKETING_SHARED_TOKEN is not configured.' }, { status: 500 });
+  if (!config.webAppUrl) return NextResponse.json({ ok: false, error: 'SEDIFEX_MARKETING_APPS_SCRIPT_URL is not configured.', detail: 'Add SEDIFEX_MARKETING_APPS_SCRIPT_URL in Vercel. Your screenshot shows SEDIFEX_MARKETING_APPS_SCRIPT_URL may be named differently. Use the exact key expected by the app.' }, { status: 500 });
+  if (!config.sharedToken) return NextResponse.json({ ok: false, error: 'SEDIFEX_MARKETING_SHARED_TOKEN is not configured.', detail: 'Add SEDIFEX_MARKETING_SHARED_TOKEN or MARKETING_APPS_SCRIPT_TOKEN in Vercel.' }, { status: 500 });
   if (!subject) return NextResponse.json({ ok: false, error: 'Subject is required.' }, { status: 400 });
   if (!html && !text) return NextResponse.json({ ok: false, error: 'Email body is required.' }, { status: 400 });
   if (recipients.length === 0) return NextResponse.json({ ok: false, error: 'Select at least one valid recipient.' }, { status: 400 });
+
+  const outboundPayload = {
+    action: 'sendSedifexMarketingEmail',
+    token: config.sharedToken,
+    sharedToken: config.sharedToken,
+    fromEmail: config.fromEmail,
+    fromName: config.fromName,
+    replyTo: config.replyTo,
+    senderName: config.fromName,
+    senderEmail: config.fromEmail,
+    subject,
+    html,
+    text,
+    recipients,
+    audience,
+    source: 'sedifexadmin_marketing_center',
+    campaignOwner: 'sedifex',
+  };
 
   try {
     const response = await fetch(config.webAppUrl, {
@@ -112,20 +138,7 @@ export async function POST(req: Request) {
         'content-type': 'application/json',
         'x-sedifex-shared-token': config.sharedToken,
       },
-      body: JSON.stringify({
-        action: 'sendSedifexMarketingEmail',
-        token: config.sharedToken,
-        sharedToken: config.sharedToken,
-        fromEmail: config.fromEmail,
-        fromName: config.fromName,
-        replyTo: config.replyTo,
-        subject,
-        html,
-        text,
-        recipients,
-        source: 'sedifexadmin_marketing_center',
-        campaignOwner: 'sedifex',
-      }),
+      body: JSON.stringify(outboundPayload),
     });
 
     const responseText = await response.text();
@@ -133,11 +146,50 @@ export async function POST(req: Request) {
     try { parsed = JSON.parse(responseText); } catch {}
 
     if (!response.ok) {
-      return NextResponse.json({ ok: false, error: `Sedifex marketing Apps Script returned HTTP ${response.status}.`, detail: responseText.slice(0, 500) }, { status: 502 });
+      return NextResponse.json({
+        ok: false,
+        error: `Sedifex marketing Apps Script returned HTTP ${response.status}.`,
+        httpStatus: response.status,
+        detail: responseSnippet(responseText || response.statusText || 'No response body returned from Apps Script.'),
+        response: parsed,
+        requestSummary: {
+          appScriptUrlConfigured: Boolean(config.webAppUrl),
+          sender: `${config.fromName} <${config.fromEmail}>`,
+          audience,
+          recipientCount: recipients.length,
+        },
+      }, { status: 502 });
     }
 
-    return NextResponse.json({ ok: true, sentToScript: recipients.length, fromEmail: config.fromEmail, response: parsed ?? responseText.slice(0, 500) });
+    if (parsed && typeof parsed === 'object' && 'ok' in parsed && (parsed as { ok?: unknown }).ok === false) {
+      const parsedRecord = parsed as { error?: unknown; message?: unknown; detail?: unknown };
+      return NextResponse.json({
+        ok: false,
+        error: cleanText(parsedRecord.error) || cleanText(parsedRecord.message) || 'Apps Script returned ok:false.',
+        detail: cleanText(parsedRecord.detail) || responseSnippet(responseText),
+        response: parsed,
+      }, { status: 502 });
+    }
+
+    return NextResponse.json({
+      ok: true,
+      sentToScript: recipients.length,
+      fromEmail: config.fromEmail,
+      fromName: config.fromName,
+      audience,
+      response: parsed ?? responseSnippet(responseText),
+    });
   } catch (error) {
-    return NextResponse.json({ ok: false, error: error instanceof Error ? error.message : 'Unable to send Sedifex marketing email.' }, { status: 500 });
+    return NextResponse.json({
+      ok: false,
+      error: error instanceof Error ? error.message : 'Unable to send Sedifex marketing email.',
+      detail: error instanceof Error ? error.stack : undefined,
+      requestSummary: {
+        appScriptUrlConfigured: Boolean(config.webAppUrl),
+        sender: `${config.fromName} <${config.fromEmail}>`,
+        audience,
+        recipientCount: recipients.length,
+      },
+    }, { status: 500 });
   }
 }
