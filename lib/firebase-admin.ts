@@ -1,10 +1,12 @@
 import { cert, getApps, initializeApp } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
+import { getStorage } from 'firebase-admin/storage';
 
 type FirebaseEnvStatus = {
   ready: boolean;
   projectId: string | null;
   databaseId: string;
+  storageBucket: string | null;
   hasServiceAccountJson: boolean;
   hasProjectId: boolean;
   hasClientEmail: boolean;
@@ -51,6 +53,23 @@ function getCredentialConfig() {
   };
 }
 
+function getConfiguredProjectId() {
+  if (process.env.FIREBASE_PROJECT_ID) return process.env.FIREBASE_PROJECT_ID;
+  if (!process.env.FIREBASE_SERVICE_ACCOUNT_JSON) return null;
+
+  try {
+    const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON) as { project_id?: string };
+    return serviceAccount.project_id || null;
+  } catch {
+    return null;
+  }
+}
+
+export function getFirebaseStorageBucketName() {
+  const projectId = getConfiguredProjectId();
+  return process.env.FIREBASE_STORAGE_BUCKET || process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || (projectId ? `${projectId}.appspot.com` : null);
+}
+
 export function getFirebaseEnvStatus(): FirebaseEnvStatus {
   const hasServiceAccountJson = Boolean(process.env.FIREBASE_SERVICE_ACCOUNT_JSON);
   const hasProjectId = Boolean(process.env.FIREBASE_PROJECT_ID);
@@ -59,8 +78,9 @@ export function getFirebaseEnvStatus(): FirebaseEnvStatus {
 
   return {
     ready: hasServiceAccountJson || (hasProjectId && hasClientEmail && hasPrivateKey),
-    projectId: process.env.FIREBASE_PROJECT_ID || null,
+    projectId: getConfiguredProjectId(),
     databaseId: process.env.FIREBASE_DATABASE_ID || '(default)',
+    storageBucket: getFirebaseStorageBucketName(),
     hasServiceAccountJson,
     hasProjectId,
     hasClientEmail,
@@ -76,12 +96,19 @@ function firebaseApp() {
   return initializeApp({
     credential: cert(credential),
     projectId: credential.projectId,
+    storageBucket: getFirebaseStorageBucketName() || undefined,
   });
 }
 
 export function adminFirestore() {
   const databaseId = process.env.FIREBASE_DATABASE_ID;
   return databaseId ? getFirestore(firebaseApp(), databaseId) : getFirestore(firebaseApp());
+}
+
+export function adminStorageBucket() {
+  const bucketName = getFirebaseStorageBucketName();
+  if (!bucketName) throw new Error('Missing Firebase storage bucket. Add FIREBASE_STORAGE_BUCKET or FIREBASE_PROJECT_ID.');
+  return getStorage(firebaseApp()).bucket(bucketName);
 }
 
 function firestore() {
