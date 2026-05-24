@@ -4,6 +4,7 @@ import Link from 'next/link';
 import type { ComponentType } from 'react';
 import { usePathname } from 'next/navigation';
 import {
+  BarChart3,
   ChevronRight,
   CircleAlert,
   Hammer,
@@ -34,6 +35,7 @@ const groups: { label: string; items: Item[] }[] = [
       { href: '/admin/google-sync', label: 'Google Sync', icon: PackageCheck },
       { href: '/admin/catalog-sync', label: 'Catalog Sync', icon: Hammer },
       { href: '/admin/orders', label: 'Orders', icon: ShoppingBag },
+      { href: '/admin/analytics', label: 'Analytics', icon: BarChart3 },
     ],
   },
   {
