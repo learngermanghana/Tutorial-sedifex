@@ -1,5 +1,8 @@
 import { NextResponse } from 'next/server';
 
+export const runtime = 'nodejs';
+export const maxDuration = 60;
+
 type Recipient = {
   name?: string;
   email?: string;
@@ -132,6 +135,12 @@ function validateMarketingWebhookUrl(webAppUrl: string) {
   return { ok: true };
 }
 
+function timeoutSignal(milliseconds: number) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), milliseconds);
+  return { signal: controller.signal, clear: () => clearTimeout(timeout) };
+}
+
 export async function POST(req: Request) {
   const role = cookieValue(req, 'sedifex_admin_role');
   if (!isAllowedRole(role)) {
@@ -175,6 +184,8 @@ export async function POST(req: Request) {
     campaignOwner: 'sedifex',
   };
 
+  const timeout = timeoutSignal(25000);
+
   try {
     const response = await fetch(config.webAppUrl, {
       method: 'POST',
@@ -183,6 +194,7 @@ export async function POST(req: Request) {
         'x-sedifex-shared-token': config.sharedToken,
       },
       body: JSON.stringify(outboundPayload),
+      signal: timeout.signal,
     });
 
     const responseText = await response.text();
@@ -232,17 +244,22 @@ export async function POST(req: Request) {
       response: parsed ?? responseSnippet(responseText),
     });
   } catch (error) {
+    const timedOut = error instanceof Error && error.name === 'AbortError';
     return NextResponse.json({
       ok: false,
       campaignId,
-      error: error instanceof Error ? error.message : 'Unable to send Sedifex marketing email.',
-      detail: error instanceof Error ? error.stack : undefined,
+      error: timedOut ? 'Apps Script did not respond within 25 seconds.' : error instanceof Error ? error.message : 'Unable to send Sedifex marketing email.',
+      detail: timedOut
+        ? 'The Google Apps Script webhook took too long to respond. Make sure the queued Apps Script version is deployed as a new Web App version and that it queues recipients quickly instead of sending all emails before responding.'
+        : error instanceof Error ? error.stack : undefined,
       requestSummary: {
         appScriptUrlConfigured: Boolean(config.webAppUrl),
         sender: `${config.fromName} <${config.fromEmail}>`,
         audience,
         recipientCount: recipients.length,
       },
-    }, { status: 500 });
+    }, { status: timedOut ? 504 : 500 });
+  } finally {
+    timeout.clear();
   }
 }
