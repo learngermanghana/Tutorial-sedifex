@@ -9,6 +9,7 @@ import {
   Hammer,
   House,
   Mail,
+  Megaphone,
   MessageCircle,
   Package,
   PackageCheck,
@@ -39,6 +40,7 @@ const groups: { label: string; items: Item[] }[] = [
     label: 'Operations',
     items: [
       { href: '/admin/marketing', label: 'Marketing Center', icon: Mail },
+      { href: '/admin/adverts', label: 'Advert Manager', icon: Megaphone },
       { href: '/admin/checkout-health', label: 'Checkout Health', icon: CircleAlert },
       { href: '/admin/deliveries', label: 'Webhook Deliveries', icon: Webhook },
       { href: '/admin/store-settings/manage', label: 'Advanced Settings', icon: Settings },
