@@ -1,7 +1,7 @@
 'use client';
 
 import { ChangeEvent, FormEvent, useMemo, useState } from 'react';
-import { ImagePlus, Mail, RefreshCw, Search, Send, UploadCloud, Users } from 'lucide-react';
+import { ImagePlus, Mail, PackageSearch, RefreshCw, Search, Send, UploadCloud, Users } from 'lucide-react';
 import type { MarketingContact } from '../../lib/marketing-contacts';
 
 type AudienceMode = 'stores' | 'customers' | 'both';
@@ -22,6 +22,28 @@ type UploadResult = {
   error?: string;
   detail?: string;
   rawResponse?: string;
+};
+
+type ProductPick = {
+  id: string;
+  name: string;
+  price: string;
+  priceNumber: number;
+  currency: string;
+  storeId: string;
+  storeName: string;
+  imageUrl: string;
+  productUrl: string;
+  category: string;
+  score: number;
+};
+
+type ProductPicksResponse = {
+  ok?: boolean;
+  error?: string;
+  products?: ProductPick[];
+  scanned?: number;
+  eligible?: number;
 };
 
 function sourceOptions(contacts: MarketingContact[]) {
@@ -108,6 +130,71 @@ function readFileAsDataUrl(file: File) {
   });
 }
 
+function buildProductEmailText(products: ProductPick[]) {
+  const productLines = products.map((product, index) => `${index + 1}. ${product.name}\nPrice: ${product.price}\nStore: ${product.storeName}\nShop now: ${product.productUrl}`).join('\n\n');
+  return `Hello {{name}},\n\nFresh products from verified Ghana stores are available on Sedifex Market today.\n\n${productLines}\n\nWhy shop on Sedifex Market?\n\n• Products from verified stores\n• Clear product, price, and seller details\n• Secure checkout records and receipts\n• Delivery or pickup information before you buy\n\nBrowse more products here:\nhttps://www.sedifexmarket.com/products\n\nShop with clarity.\n\nSedifex Team\nhttps://www.sedifexmarket.com`;
+}
+
+function buildProductEmailHtml(products: ProductPick[]) {
+  const cards = products.map((product) => `
+    <td style="width:50%;padding:8px;vertical-align:top;">
+      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border:1px solid #e2e8f0;border-radius:18px;overflow:hidden;background:#ffffff;">
+        <tr>
+          <td style="background:#f8fafc;">
+            <a href="${escapeHtml(product.productUrl)}" style="display:block;text-decoration:none;">
+              <img src="${escapeHtml(product.imageUrl)}" alt="${escapeHtml(product.name)}" style="display:block;width:100%;height:190px;object-fit:cover;border:0;" />
+            </a>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:14px;">
+            <p style="margin:0 0 6px;font-size:12px;line-height:18px;color:#047857;font-weight:800;">Verified store</p>
+            <h3 style="margin:0 0 8px;font-size:16px;line-height:22px;color:#111827;">${escapeHtml(product.name)}</h3>
+            <p style="margin:0 0 8px;font-size:14px;line-height:20px;color:#475569;">Store: ${escapeHtml(product.storeName)}</p>
+            <p style="margin:0 0 12px;font-size:20px;line-height:24px;color:#ea580c;font-weight:900;">${escapeHtml(product.price)}</p>
+            <a href="${escapeHtml(product.productUrl)}" style="display:inline-block;background:#111827;color:#ffffff;text-decoration:none;border-radius:999px;padding:10px 16px;font-size:13px;font-weight:900;">Shop now</a>
+          </td>
+        </tr>
+      </table>
+    </td>
+  `).join('');
+
+  const rows = products.reduce<string[]>((acc, _, index) => {
+    if (index % 2 === 0) acc.push(cards.split('</td>').slice(index, index + 2).map((item) => item ? `${item}</td>` : '').join(''));
+    return acc;
+  }, []);
+
+  const productRows = rows.map((row) => `<tr>${row}</tr>`).join('');
+
+  return `
+    <div style="margin:0 auto;max-width:680px;background:#ffffff;color:#111827;font-family:Arial,Helvetica,sans-serif;">
+      <div style="border-radius:24px;overflow:hidden;background:linear-gradient(135deg,#ff7a00,#ffbd3d);padding:28px 22px;margin-bottom:20px;">
+        <p style="margin:0 0 8px;font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:#7c2d12;font-weight:900;">Sedifex Market Picks</p>
+        <h1 style="margin:0;font-size:30px;line-height:36px;color:#111827;">Fresh products from verified Ghana stores</h1>
+        <p style="margin:12px 0 0;font-size:15px;line-height:23px;color:#2b2115;">Shop with clear seller details, secure checkout records, receipts, and delivery or pickup information before you buy.</p>
+      </div>
+
+      <p style="font-size:15px;line-height:24px;color:#334155;">Hello {{name}},</p>
+      <p style="font-size:15px;line-height:24px;color:#334155;">We picked these products from verified stores on Sedifex Market today.</p>
+
+      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:separate;border-spacing:0;">
+        ${productRows}
+      </table>
+
+      <div style="margin-top:22px;border-radius:18px;background:#f8fafc;border:1px solid #e2e8f0;padding:18px;">
+        <p style="margin:0 0 8px;font-size:15px;line-height:22px;color:#111827;font-weight:900;">Why shop on Sedifex Market?</p>
+        <p style="margin:0;font-size:14px;line-height:23px;color:#475569;">Products from verified stores • Clear price and seller details • Secure checkout records • Receipts after purchase • Delivery or pickup information before you buy</p>
+      </div>
+
+      <p style="margin:22px 0;text-align:center;">
+        <a href="https://www.sedifexmarket.com/products" style="display:inline-block;background:#ff7a00;color:#ffffff;text-decoration:none;border-radius:999px;padding:13px 22px;font-size:14px;font-weight:900;">Browse more products</a>
+      </p>
+
+      <p style="font-size:13px;line-height:20px;color:#64748b;">Sedifex Team<br />https://www.sedifexmarket.com</p>
+    </div>
+  `;
+}
+
 export default function MarketingCenterClient({ contacts }: { contacts: MarketingContact[] }) {
   const [query, setQuery] = useState('');
   const [audience, setAudience] = useState<AudienceMode>('both');
@@ -118,9 +205,12 @@ export default function MarketingCenterClient({ contacts }: { contacts: Marketin
   const [selectedEmails, setSelectedEmails] = useState<string[]>([]);
   const [subject, setSubject] = useState('');
   const [body, setBody] = useState('');
+  const [customHtml, setCustomHtml] = useState('');
   const [campaignImageUrl, setCampaignImageUrl] = useState('');
   const [imageUploading, setImageUploading] = useState(false);
   const [imageUploadError, setImageUploadError] = useState('');
+  const [productGenerating, setProductGenerating] = useState(false);
+  const [productGenerateMessage, setProductGenerateMessage] = useState('');
   const [sending, setSending] = useState(false);
   const [result, setResult] = useState<SendResult>(null);
 
@@ -204,11 +294,41 @@ export default function MarketingCenterClient({ contacts }: { contacts: Marketin
       }
 
       setCampaignImageUrl(parsed.imageUrl);
+      setCustomHtml('');
     } catch (error) {
       setImageUploadError(error instanceof Error ? error.message : 'Image upload failed.');
     } finally {
       setImageUploading(false);
       event.target.value = '';
+    }
+  }
+
+  async function generateProductEmail() {
+    setProductGenerating(true);
+    setProductGenerateMessage('');
+    setResult(null);
+
+    try {
+      const response = await fetch('/api/admin/marketing/product-picks?limit=5', { cache: 'no-store' });
+      const rawResponse = await response.text();
+      const parsed = parseMaybeJson(rawResponse) as ProductPicksResponse | null;
+      if (!response.ok || !parsed?.ok) throw new Error(parsed?.error || rawResponse || 'Unable to generate product picks.');
+
+      const products = parsed.products || [];
+      if (products.length === 0) {
+        throw new Error(`No eligible verified-store products found. Scanned ${parsed.scanned ?? 0} listings, eligible ${parsed.eligible ?? 0}. Products need verified store, image, price, and public visibility.`);
+      }
+
+      setAudience('customers');
+      setSubject('Fresh products from verified stores on Sedifex Market');
+      setBody(buildProductEmailText(products));
+      setCustomHtml(buildProductEmailHtml(products));
+      setCampaignImageUrl('');
+      setProductGenerateMessage(`Generated email with ${products.length} verified-store products. Scanned ${parsed.scanned ?? 0}, eligible ${parsed.eligible ?? products.length}. Review before sending.`);
+    } catch (error) {
+      setProductGenerateMessage(error instanceof Error ? error.message : 'Unable to generate product email.');
+    } finally {
+      setProductGenerating(false);
     }
   }
 
@@ -225,7 +345,7 @@ export default function MarketingCenterClient({ contacts }: { contacts: Marketin
           audience,
           subject,
           text: textWithImage(body, campaignImageUrl),
-          html: bodyToHtml(body, campaignImageUrl),
+          html: customHtml || bodyToHtml(body, campaignImageUrl),
           ctaUrl: audience === 'stores' ? 'https://www.sedifex.com' : 'https://www.sedifexmarket.com',
           ctaLabel: audience === 'stores' ? 'Update Your Store' : 'Open Sedifex Market',
           recipients: selectedContacts.map((contact) => ({
@@ -359,8 +479,23 @@ export default function MarketingCenterClient({ contacts }: { contacts: Marketin
             <strong>Sending as Sedifex Team</strong>
             <p className="mt-1">Choose the audience on the left: all stores, all customers, or both. The message will not use a store name as sender.</p>
           </div>
+
+          <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm leading-6 text-emerald-900">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <strong className="flex items-center gap-2"><PackageSearch className="h-4 w-4" /> Auto product email</strong>
+                <p className="mt-1">Pull 5 products from verified stores only, then create a Jumia-style product email automatically.</p>
+              </div>
+              <button type="button" onClick={generateProductEmail} disabled={productGenerating || sending} className="inline-flex items-center justify-center gap-2 rounded-2xl bg-emerald-600 px-4 py-2 text-xs font-bold text-white hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-60">
+                {productGenerating ? <RefreshCw className="h-4 w-4 animate-spin" /> : <PackageSearch className="h-4 w-4" />}
+                {productGenerating ? 'Generating…' : 'Generate 5 products'}
+              </button>
+            </div>
+            {productGenerateMessage ? <p className="mt-3 rounded-xl bg-white/70 p-3 text-xs font-semibold text-emerald-900 ring-1 ring-emerald-200">{productGenerateMessage}</p> : null}
+          </div>
+
           <label className="block text-sm font-medium text-slate-700">Subject
-            <input value={subject} onChange={(event) => setSubject(event.target.value)} placeholder="Your campaign subject" className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-indigo-300 focus:ring-4 focus:ring-indigo-100" />
+            <input value={subject} onChange={(event) => { setSubject(event.target.value); }} placeholder="Your campaign subject" className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-indigo-300 focus:ring-4 focus:ring-indigo-100" />
           </label>
 
           <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-4">
@@ -388,8 +523,10 @@ export default function MarketingCenterClient({ contacts }: { contacts: Marketin
           </div>
 
           <label className="block text-sm font-medium text-slate-700">Message
-            <textarea value={body} onChange={(event) => setBody(event.target.value)} rows={12} placeholder="Write your email. Use clear offer, short message, and contact details." className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm leading-6 outline-none focus:border-indigo-300 focus:ring-4 focus:ring-indigo-100" />
+            <textarea value={body} onChange={(event) => { setBody(event.target.value); setCustomHtml(''); }} rows={12} placeholder="Write your email. Use clear offer, short message, and contact details." className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm leading-6 outline-none focus:border-indigo-300 focus:ring-4 focus:ring-indigo-100" />
           </label>
+
+          {customHtml ? <p className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-xs font-semibold leading-5 text-emerald-800">A product-card HTML email has been generated. Editing the message text will remove the product-card layout and send the plain paragraph layout instead.</p> : null}
 
           <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-800">
             Only selected non-opted-out contacts will be sent. Keep marketing messages relevant and include a way to unsubscribe or contact support.
