@@ -18,6 +18,7 @@ type ProductPick = {
   productUrl: string;
   category: string;
   score: number;
+  verificationSource: string;
 };
 
 const LISTING_COLLECTIONS = ['publicListings', 'publicProducts'] as const;
@@ -51,8 +52,8 @@ function booleanValue(value: unknown): boolean | null {
   if (typeof value === 'number') return value === 1;
   if (typeof value === 'string') {
     const normalized = value.trim().toLowerCase();
-    if (['true', '1', 'yes', 'verified', 'active', 'approved', 'published', 'visible'].includes(normalized)) return true;
-    if (['false', '0', 'no', 'draft', 'hidden', 'rejected', 'suspended'].includes(normalized)) return false;
+    if (['true', '1', 'yes', 'verified', 'approved'].includes(normalized)) return true;
+    if (['false', '0', 'no', 'draft', 'hidden', 'rejected', 'suspended', 'inactive', 'unverified', 'pending'].includes(normalized)) return false;
   }
   return null;
 }
@@ -153,14 +154,26 @@ function listingType(record: RawRecord) {
   return text(record.listingType || record.itemType, 'product').toLowerCase();
 }
 
-function isVerifiedStore(store: RawRecord | undefined, listing: RawRecord) {
-  if (store) {
-    const status = text(store.status || store.verificationStatus || store.storeStatus || store.approvalStatus).toLowerCase();
-    if (['verified', 'approved', 'active', 'published'].includes(status)) return true;
-    if (isTrue(store.verified) || isTrue(store.isVerified) || isTrue(store.verifiedStore) || isTrue(store.isApproved)) return true;
-    return false;
+function verificationSource(store: RawRecord | undefined) {
+  if (!store) return '';
+
+  const directFields = ['verified', 'isVerified', 'verifiedStore', 'isApproved', 'isStoreVerified', 'marketplaceVerified'];
+  for (const field of directFields) {
+    if (isTrue(store[field])) return field;
   }
-  return isTrue(listing.verified) || isTrue(listing.storeVerified) || isTrue(listing.isStoreVerified);
+
+  const statusFields = ['verificationStatus', 'approvalStatus', 'storeVerificationStatus', 'marketplaceVerificationStatus'];
+  for (const field of statusFields) {
+    const status = text(store[field]).toLowerCase();
+    if (['verified', 'approved'].includes(status)) return field;
+  }
+
+  // Important: status=active/published means the store is live, not verified.
+  return '';
+}
+
+function isVerifiedStore(store: RawRecord | undefined) {
+  return Boolean(verificationSource(store));
 }
 
 function storeNameFrom(store: RawRecord | undefined, listing: RawRecord) {
@@ -178,16 +191,21 @@ async function loadStores(storeIds: string[]) {
   const map = new Map<string, RawRecord>();
   await Promise.all(Array.from(new Set(storeIds.filter(Boolean))).map(async (storeId) => {
     try {
-      const snapshot = await db.collection('stores').doc(storeId).get();
-      if (snapshot.exists) map.set(storeId, snapshot.data() || {});
+      const storesSnapshot = await db.collection('stores').doc(storeId).get();
+      const settingsSnapshot = await db.collection('storeSettings').doc(storeId).get();
+      const storesData = storesSnapshot.exists ? storesSnapshot.data() || {} : {};
+      const settingsData = settingsSnapshot.exists ? settingsSnapshot.data() || {} : {};
+      if (storesSnapshot.exists || settingsSnapshot.exists) {
+        map.set(storeId, { ...settingsData, ...storesData, id: storeId, storeRecordFound: true });
+      }
     } catch {}
   }));
   return map;
 }
 
-function scoreProduct(record: RawRecord, imageUrl: string, price: number, storeVerified: boolean) {
+function scoreProduct(record: RawRecord, imageUrl: string, price: number) {
   let score = 0;
-  if (storeVerified) score += 10;
+  score += 10;
   if (imageUrl) score += 5;
   if (price > 0) score += 4;
   if (text(record.description).length > 20) score += 1;
@@ -220,25 +238,62 @@ export async function GET(req: Request) {
     const stores = await loadStores(storeIds);
     const seen = new Set<string>();
     const candidates: ProductPick[] = [];
+    const skipped = {
+      noStoreId: 0,
+      storeRecordMissing: 0,
+      unverifiedStore: 0,
+      missingImage: 0,
+      missingPrice: 0,
+      nonProduct: 0,
+      notPublic: 0,
+    };
 
     rawListings.forEach((record) => {
       const id = text(record.id);
       if (!id || seen.has(id)) return;
       seen.add(id);
-      if (listingType(record) !== 'product') return;
-      if (!isPublicListing(record)) return;
+      if (listingType(record) !== 'product') {
+        skipped.nonProduct += 1;
+        return;
+      }
+      if (!isPublicListing(record)) {
+        skipped.notPublic += 1;
+        return;
+      }
 
       const storeId = text(record.storeId || record.merchantId);
-      const store = storeId ? stores.get(storeId) : undefined;
-      const verified = isVerifiedStore(store, record);
-      if (!verified) return;
+      if (!storeId) {
+        skipped.noStoreId += 1;
+        return;
+      }
+
+      const store = stores.get(storeId);
+      if (!store) {
+        skipped.storeRecordMissing += 1;
+        return;
+      }
+
+      const verified = isVerifiedStore(store);
+      if (!verified) {
+        skipped.unverifiedStore += 1;
+        return;
+      }
 
       const name = cleanName(record);
       const imageUrl = firstImage(record);
       const price = numberValue(record.price || record.salePrice || record.finalPrice);
-      if (!name || !imageUrl || !price || price <= 0) return;
+      if (!imageUrl) {
+        skipped.missingImage += 1;
+        return;
+      }
+      if (!price || price <= 0) {
+        skipped.missingPrice += 1;
+        return;
+      }
+      if (!name) return;
 
       const currency = text(record.currency, 'GHS').toUpperCase();
+      const source = verificationSource(store);
       candidates.push({
         id,
         name,
@@ -250,7 +305,8 @@ export async function GET(req: Request) {
         imageUrl,
         productUrl: productUrl(id, name),
         category: text(record.categoryName || record.categoryKey || record.category, 'Product'),
-        score: scoreProduct(record, imageUrl, price, verified),
+        score: scoreProduct(record, imageUrl, price),
+        verificationSource: source,
       });
     });
 
@@ -268,12 +324,14 @@ export async function GET(req: Request) {
 
     return NextResponse.json({
       ok: true,
-      source: 'sedifex_products_verified_stores',
+      source: 'sedifex_products_strict_verified_store_records',
       requestedLimit,
       scanned: rawListings.length,
       eligible: candidates.length,
+      skipped,
       products: selected,
       generatedAt: new Date().toISOString(),
+      note: 'Strict mode: product emails only include products whose store document exists in stores/storeSettings and has verified/isVerified/verifiedStore/isApproved/isStoreVerified/marketplaceVerified=true or verificationStatus/approvalStatus=verified|approved. status=active/published is not enough.',
     });
   } catch (error) {
     console.error('[marketing-product-picks] failed', error);
