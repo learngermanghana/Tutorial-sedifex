@@ -17,122 +17,27 @@ type Candidate = {
 };
 
 const NAV_ITEMS = [
-  'dashboard',
-  'reports',
-  'products',
-  'sell',
-  'quick-pay',
-  'invoices',
-  'receipts',
-  'customers',
-  'students',
-  'bookings',
-  'upcoming-events',
-  'student-registration',
-  'volunteers',
-  'support-requests',
-  'settlement',
-  'integrations',
-  'blog',
-  'promo',
-  'gallery',
-  'social-links',
-  'website-builder',
-  'bulk-messaging',
-  'bulk-email',
-  'donor-management',
-  'funds-ledger',
-  'account',
+  'dashboard', 'reports', 'products', 'sell', 'quick-pay', 'invoices', 'receipts', 'customers', 'students', 'bookings',
+  'upcoming-events', 'student-registration', 'volunteers', 'support-requests', 'settlement', 'integrations', 'blog',
+  'promo', 'gallery', 'social-links', 'website-builder', 'bulk-messaging', 'bulk-email', 'donor-management', 'funds-ledger', 'account',
 ];
 
 const INDUSTRY_ENABLED_MODULE_PRESETS: Record<Industry, string[]> = {
-  shop: [
-    'dashboard',
-    'reports',
-    'products',
-    'sell',
-    'quick-pay',
-    'invoices',
-    'receipts',
-    'customers',
-    'bookings',
-    'upcoming-events',
-    'settlement',
-    'integrations',
-    'blog',
-    'promo',
-    'gallery',
-    'social-links',
-    'website-builder',
-    'donor-management',
-  ],
-  travel: [
-    'dashboard',
-    'reports',
-    'products',
-    'quick-pay',
-    'invoices',
-    'receipts',
-    'bookings',
-    'upcoming-events',
-    'settlement',
-    'integrations',
-    'blog',
-    'promo',
-    'gallery',
-    'social-links',
-    'website-builder',
-    'customers',
-    'bulk-messaging',
-    'bulk-email',
-    'donor-management',
-  ],
-  ngo: [
-    'dashboard',
-    'reports',
-    'products',
-    'quick-pay',
-    'invoices',
-    'receipts',
-    'customers',
-    'volunteers',
-    'support-requests',
-    'upcoming-events',
-    'settlement',
-    'integrations',
-    'blog',
-    'promo',
-    'gallery',
-    'social-links',
-    'website-builder',
-    'bulk-messaging',
-    'bulk-email',
-    'donor-management',
-    'funds-ledger',
-  ],
-  school: [
-    'dashboard',
-    'reports',
-    'products',
-    'quick-pay',
-    'invoices',
-    'receipts',
-    'bookings',
-    'upcoming-events',
-    'student-registration',
-    'students',
-    'settlement',
-    'integrations',
-    'blog',
-    'promo',
-    'gallery',
-    'social-links',
-    'website-builder',
-    'customers',
-    'bulk-messaging',
-    'bulk-email',
-  ],
+  shop: ['dashboard', 'reports', 'products', 'sell', 'quick-pay', 'invoices', 'receipts', 'customers', 'bookings', 'upcoming-events', 'settlement', 'integrations', 'blog', 'promo', 'gallery', 'social-links', 'website-builder', 'donor-management'],
+  travel: ['dashboard', 'reports', 'products', 'quick-pay', 'invoices', 'receipts', 'bookings', 'upcoming-events', 'settlement', 'integrations', 'blog', 'promo', 'gallery', 'social-links', 'website-builder', 'customers', 'bulk-messaging', 'bulk-email', 'donor-management'],
+  ngo: ['dashboard', 'reports', 'products', 'quick-pay', 'invoices', 'receipts', 'customers', 'volunteers', 'support-requests', 'upcoming-events', 'settlement', 'integrations', 'blog', 'promo', 'gallery', 'social-links', 'website-builder', 'bulk-messaging', 'bulk-email', 'donor-management', 'funds-ledger'],
+  school: ['dashboard', 'reports', 'products', 'quick-pay', 'invoices', 'receipts', 'bookings', 'upcoming-events', 'student-registration', 'students', 'settlement', 'integrations', 'blog', 'promo', 'gallery', 'social-links', 'website-builder', 'customers', 'bulk-messaging', 'bulk-email'],
 };
+
+function json(payload: Record<string, unknown>, status = 200) {
+  return NextResponse.json(payload, { status });
+}
+
+function errorPayload(error: unknown, fallback: string) {
+  const message = error instanceof Error ? error.message : String(error || fallback);
+  const stack = process.env.NODE_ENV === 'production' ? undefined : error instanceof Error ? error.stack : undefined;
+  return { ok: false, error: message || fallback, stack };
+}
 
 function cookieValue(req: Request, name: string) {
   return req.headers.get('cookie')?.split(';').map((part) => part.trim()).find((part) => part.startsWith(`${name}=`))?.split('=')[1];
@@ -140,6 +45,14 @@ function cookieValue(req: Request, name: string) {
 
 function isAllowedRole(role?: string) {
   return role === 'super_admin' || role === 'ops_admin';
+}
+
+function assertAdmin(req: Request, action: string) {
+  const role = cookieValue(req, 'sedifex_admin_role');
+  if (!isAllowedRole(role)) {
+    return json({ ok: false, error: `Only super_admin or ops_admin can ${action}.`, currentRole: role || null }, 403);
+  }
+  return null;
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -280,52 +193,84 @@ async function applyRepair(candidates: Candidate[]) {
   return updated;
 }
 
+function limitFrom(value: string | number | null | undefined) {
+  return Math.min(Math.max(Number(value || 500), 1), 1000);
+}
+
 export async function GET(req: Request) {
-  const role = cookieValue(req, 'sedifex_admin_role');
-  if (!isAllowedRole(role)) return NextResponse.json({ ok: false, error: 'Only super_admin or ops_admin can inspect navigation repair.' }, { status: 403 });
+  try {
+    const denied = assertAdmin(req, 'inspect navigation repair');
+    if (denied) return denied;
 
-  const url = new URL(req.url);
-  const limit = Math.min(Math.max(Number(url.searchParams.get('limit') || 500), 1), 1000);
-  const candidates = await findCandidates(limit);
+    const url = new URL(req.url);
+    const limit = limitFrom(url.searchParams.get('limit'));
+    const applyFromQuery = url.searchParams.get('apply') === 'true';
+    const candidates = await findCandidates(limit);
 
-  return NextResponse.json({
-    ok: true,
-    mode: 'dry-run',
-    message: 'No changes were made. Send POST with { "apply": true } to repair these stores.',
-    scannedLimit: limit,
-    candidatesCount: candidates.length,
-    candidates: candidates.slice(0, 100),
-  });
+    if (applyFromQuery) {
+      const updated = await applyRepair(candidates);
+      return json({
+        ok: true,
+        mode: 'applied-from-get',
+        updated,
+        message: `Navigation repaired for ${updated} store setting documents.`,
+        candidates: candidates.slice(0, 100),
+      });
+    }
+
+    return json({
+      ok: true,
+      mode: 'dry-run',
+      message: 'No changes were made. Open this URL with ?apply=true to repair, or send POST with { "apply": true }.',
+      scannedLimit: limit,
+      candidatesCount: candidates.length,
+      candidates: candidates.slice(0, 100),
+    });
+  } catch (error) {
+    console.error('[navigation-repair] GET failed', error);
+    return json({
+      ...errorPayload(error, 'Navigation repair dry-run failed.'),
+      hint: 'Check Firebase Admin environment variables and make sure this route is deployed on sedifexadmin.',
+    }, 500);
+  }
 }
 
 export async function POST(req: Request) {
-  const role = cookieValue(req, 'sedifex_admin_role');
-  if (!isAllowedRole(role)) return NextResponse.json({ ok: false, error: 'Only super_admin or ops_admin can apply navigation repair.' }, { status: 403 });
+  try {
+    const denied = assertAdmin(req, 'apply navigation repair');
+    if (denied) return denied;
 
-  const body = await req.json().catch(() => ({})) as { apply?: boolean; limit?: number; storeIds?: string[] };
-  const limit = Math.min(Math.max(Number(body.limit || 500), 1), 1000);
-  const candidates = await findCandidates(limit);
-  const narrowedCandidates = Array.isArray(body.storeIds) && body.storeIds.length > 0
-    ? candidates.filter((candidate) => body.storeIds?.includes(candidate.storeId))
-    : candidates;
+    const body = await req.json().catch(() => ({})) as { apply?: boolean; limit?: number; storeIds?: string[] };
+    const limit = limitFrom(body.limit);
+    const candidates = await findCandidates(limit);
+    const narrowedCandidates = Array.isArray(body.storeIds) && body.storeIds.length > 0
+      ? candidates.filter((candidate) => body.storeIds?.includes(candidate.storeId))
+      : candidates;
 
-  if (body.apply !== true) {
-    return NextResponse.json({
+    if (body.apply !== true) {
+      return json({
+        ok: true,
+        mode: 'dry-run',
+        message: 'No changes were made because apply was not true.',
+        candidatesCount: narrowedCandidates.length,
+        candidates: narrowedCandidates.slice(0, 100),
+      });
+    }
+
+    const updated = await applyRepair(narrowedCandidates);
+
+    return json({
       ok: true,
-      mode: 'dry-run',
-      message: 'No changes were made because apply was not true.',
-      candidatesCount: narrowedCandidates.length,
+      mode: 'applied',
+      updated,
+      message: `Navigation repaired for ${updated} store setting documents.`,
       candidates: narrowedCandidates.slice(0, 100),
     });
+  } catch (error) {
+    console.error('[navigation-repair] POST failed', error);
+    return json({
+      ...errorPayload(error, 'Navigation repair apply failed.'),
+      hint: 'If you used browser console fetch, inspect the Response text. This endpoint now always returns JSON.',
+    }, 500);
   }
-
-  const updated = await applyRepair(narrowedCandidates);
-
-  return NextResponse.json({
-    ok: true,
-    mode: 'applied',
-    updated,
-    message: `Navigation repaired for ${updated} store setting documents.`,
-    candidates: narrowedCandidates.slice(0, 100),
-  });
 }
