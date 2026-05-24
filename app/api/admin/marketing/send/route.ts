@@ -96,6 +96,42 @@ function campaignIdForRequest(audience: string) {
   return `sedifex_${audience}_${Date.now()}_${randomPart}`.replace(/[^a-zA-Z0-9_-]/g, '_');
 }
 
+function validateMarketingWebhookUrl(webAppUrl: string) {
+  if (!webAppUrl) {
+    return {
+      ok: false,
+      error: 'SEDIFEX_MARKETING_APPS_SCRIPT_URL is not configured.',
+      detail: 'Add your Google Apps Script Web App URL in Vercel. It should look like https://script.google.com/macros/s/.../exec, not your Sedifex admin website URL.',
+    };
+  }
+
+  let parsed: URL;
+  try {
+    parsed = new URL(webAppUrl);
+  } catch {
+    return {
+      ok: false,
+      error: 'SEDIFEX_MARKETING_APPS_SCRIPT_URL is not a valid URL.',
+      detail: `Current value starts with: ${webAppUrl.slice(0, 80)}`,
+    };
+  }
+
+  const host = parsed.hostname.toLowerCase();
+  const path = parsed.pathname.toLowerCase();
+  const looksLikeAppsScript = (host === 'script.google.com' || host.endsWith('.googleusercontent.com')) && path.includes('/macros/');
+  const looksLikeSedifexSite = host.includes('sedifex.com') || host.includes('sedifexmarket.com');
+
+  if (looksLikeSedifexSite || !looksLikeAppsScript) {
+    return {
+      ok: false,
+      error: 'Wrong marketing webhook URL configured.',
+      detail: `SEDIFEX_MARKETING_APPS_SCRIPT_URL must be the Google Apps Script Web App URL, for example https://script.google.com/macros/s/.../exec. Current host is ${host}. This is why the campaign showed a Cloudflare 502 from admin.sedifex.com instead of reaching Apps Script.`,
+    };
+  }
+
+  return { ok: true };
+}
+
 export async function POST(req: Request) {
   const role = cookieValue(req, 'sedifex_admin_role');
   if (!isAllowedRole(role)) {
@@ -111,8 +147,9 @@ export async function POST(req: Request) {
   const config = sedifexMarketingConfig();
   const campaignId = campaignIdForRequest(audience);
   const createdAt = new Date().toISOString();
+  const webhookValidation = validateMarketingWebhookUrl(config.webAppUrl);
 
-  if (!config.webAppUrl) return NextResponse.json({ ok: false, error: 'SEDIFEX_MARKETING_APPS_SCRIPT_URL is not configured.', detail: 'Add SEDIFEX_MARKETING_APPS_SCRIPT_URL in Vercel. Your screenshot shows SEDIFEX_MARKETING_APPS_SCRIPT_URL may be named differently. Use the exact key expected by the app.' }, { status: 500 });
+  if (!webhookValidation.ok) return NextResponse.json({ ok: false, error: webhookValidation.error, detail: webhookValidation.detail, campaignId }, { status: 500 });
   if (!config.sharedToken) return NextResponse.json({ ok: false, error: 'SEDIFEX_MARKETING_SHARED_TOKEN is not configured.', detail: 'Add SEDIFEX_MARKETING_SHARED_TOKEN or MARKETING_APPS_SCRIPT_TOKEN in Vercel.' }, { status: 500 });
   if (!subject) return NextResponse.json({ ok: false, error: 'Subject is required.' }, { status: 400 });
   if (!html && !text) return NextResponse.json({ ok: false, error: 'Email body is required.' }, { status: 400 });
