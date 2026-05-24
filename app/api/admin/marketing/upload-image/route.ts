@@ -1,10 +1,11 @@
+import { randomUUID } from 'crypto';
 import { NextResponse } from 'next/server';
 import { adminStorageBucket } from '../../../../../lib/firebase-admin';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
 
-const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+const MAX_IMAGE_BYTES = 4 * 1024 * 1024;
 const SUPPORTED_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
 
 function cookieValue(req: Request, name: string) {
@@ -37,8 +38,8 @@ function detectImageMimeType(buffer: Buffer) {
   return null;
 }
 
-function storagePublicUrl(bucketName: string, objectName: string) {
-  return `https://storage.googleapis.com/${bucketName}/${encodeURI(objectName)}`;
+function firebaseDownloadUrl(bucketName: string, objectName: string, token: string) {
+  return `https://firebasestorage.googleapis.com/v0/b/${bucketName}/o/${encodeURIComponent(objectName)}?alt=media&token=${encodeURIComponent(token)}`;
 }
 
 function json(payload: Record<string, unknown>, status = 200) {
@@ -56,7 +57,7 @@ export async function GET() {
     route: '/api/admin/marketing/upload-image',
     method: 'POST',
     field: 'imageFile',
-    maxSizeMb: 5,
+    maxSizeMb: 4,
     supportedTypes: Array.from(SUPPORTED_IMAGE_TYPES),
   });
 }
@@ -75,7 +76,7 @@ export async function POST(req: Request) {
     }
 
     if (fileValue.size > MAX_IMAGE_BYTES) {
-      return json({ ok: false, error: 'Image is too large. Maximum upload size is 5 MB. Please compress or resize it first.' }, 413);
+      return json({ ok: false, error: 'Image is too large. Maximum upload size is 4 MB. Please compress or resize it first.' }, 413);
     }
 
     const buffer = Buffer.from(await fileValue.arrayBuffer());
@@ -89,6 +90,7 @@ export async function POST(req: Request) {
     const basename = originalName.replace(/\.(jpe?g|png|webp|gif)$/i, '') || 'marketing-image';
     const extension = resolveExtension(originalName, detectedMimeType);
     const objectName = `marketing-campaign-images/${new Date().toISOString().slice(0, 10)}/${Date.now()}-${basename}${extension}`;
+    const downloadToken = randomUUID();
     const target = bucket.file(objectName);
 
     await target.save(buffer, {
@@ -96,15 +98,19 @@ export async function POST(req: Request) {
       metadata: {
         contentType: detectedMimeType,
         cacheControl: 'public,max-age=31536000,immutable',
+        metadata: {
+          firebaseStorageDownloadTokens: downloadToken,
+        },
       },
     });
 
     return json({
       ok: true,
-      imageUrl: storagePublicUrl(bucket.name, objectName),
+      imageUrl: firebaseDownloadUrl(bucket.name, objectName, downloadToken),
       imagePath: objectName,
       contentType: detectedMimeType,
       sizeBytes: fileValue.size,
+      maxSizeMb: 4,
     });
   } catch (error) {
     console.error('[marketing-upload-image] failed', error);
