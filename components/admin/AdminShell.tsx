@@ -20,6 +20,8 @@ const titleMap: Record<string, { title: string; description: string }> = {
   '/admin/checkout-health': { title: 'Checkout Health', description: 'Diagnose store setup, payment, environment, and webhook issues.' },
   '/admin/deliveries': { title: 'Webhook Deliveries', description: 'Inspect real webhook deliveries, failures, retries, and replay actions.' },
   '/admin/live-chat': { title: 'Live Chat', description: 'Reply to Sedifex Market visitor messages and manage support conversations.' },
+  '/admin/marketing': { title: 'Marketing Center', description: 'Filter contacts and send bulk campaigns.' },
+  '/admin/adverts': { title: 'Advert Manager', description: 'Create, schedule, and manage Sedifex Market homepage flash adverts.' },
   '/admin/store-settings/manage': { title: 'Advanced Store Settings', description: 'Edit technical store settings, integration API, auto-sync, and booking sync safely.' },
 };
 
