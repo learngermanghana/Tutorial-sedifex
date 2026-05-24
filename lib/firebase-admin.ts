@@ -78,18 +78,20 @@ function getConfiguredProjectId() {
   }
 }
 
+function cleanBucketName(value: string) {
+  return value.trim().replace(/^gs:\/\//i, '').replace(/\/+$/, '');
+}
+
 export function getFirebaseStorageBucketName() {
   const projectId = getConfiguredProjectId();
-  const rawBucket = process.env.FIREBASE_STORAGE_BUCKET || process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || (projectId ? `${projectId}.appspot.com` : null);
-  if (!rawBucket) return null;
+  const configuredBucket = process.env.FIREBASE_STORAGE_BUCKET || process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET;
 
-  const bucketName = rawBucket.trim().replace(/^gs:\/\//i, '').replace(/\/+$/, '');
-  if (bucketName.endsWith('.firebasestorage.app')) {
-    const mappedProjectId = bucketName.replace(/\.firebasestorage\.app$/i, '');
-    return `${mappedProjectId}.appspot.com`;
-  }
+  // Important: use the exact bucket value from Vercel/Firebase.
+  // New Firebase projects can use project-id.firebasestorage.app, while older
+  // ones often use project-id.appspot.com. Do not rewrite one format into the other.
+  if (configuredBucket) return cleanBucketName(configuredBucket);
 
-  return bucketName;
+  return projectId ? `${projectId}.appspot.com` : null;
 }
 
 export function getFirebaseEnvStatus(): FirebaseEnvStatus {
