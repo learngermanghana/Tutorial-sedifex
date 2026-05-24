@@ -1,6 +1,6 @@
 import { randomUUID } from 'crypto';
 import { NextResponse } from 'next/server';
-import { adminStorageBucket } from '../../../../../lib/firebase-admin';
+import { resolveExistingFirebaseStorageBucket } from '../../../../../lib/firebase-storage-resolver';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
@@ -58,7 +58,7 @@ function json(payload: Record<string, unknown>, status = 200) {
     status,
     headers: {
       'cache-control': 'no-store',
-      'x-sedifex-upload-route-version': '2026-05-24-json-upload',
+      'x-sedifex-upload-route-version': '2026-05-24-json-upload-bucket-resolver',
     },
   });
 }
@@ -81,7 +81,7 @@ export async function GET() {
     body: { fileName: 'string', dataUrl: 'data:image/png;base64,...' },
     maxSizeMb: 4,
     supportedTypes: Array.from(SUPPORTED_IMAGE_TYPES),
-    version: '2026-05-24-json-upload',
+    version: '2026-05-24-json-upload-bucket-resolver',
   });
 }
 
@@ -110,7 +110,7 @@ export async function POST(req: Request) {
       return json({ ok: false, error: 'Unsupported image file. Please upload JPG, PNG, WEBP, or GIF.', detectedMimeType, providedContentType: contentType || null }, 400);
     }
 
-    const bucket = adminStorageBucket();
+    const { bucket, bucketName, candidates } = await resolveExistingFirebaseStorageBucket();
     const basename = fileName.replace(/\.(jpe?g|png|webp|gif)$/i, '') || 'marketing-image';
     const extension = extensionFor(detectedMimeType, fileName);
     const objectName = `marketing-campaign-images/${new Date().toISOString().slice(0, 10)}/${Date.now()}-${basename}${extension}`;
@@ -127,13 +127,15 @@ export async function POST(req: Request) {
 
     return json({
       ok: true,
-      imageUrl: firebaseDownloadUrl(bucket.name, objectName, downloadToken),
+      imageUrl: firebaseDownloadUrl(bucketName, objectName, downloadToken),
       imagePath: objectName,
+      bucketName,
+      triedBuckets: candidates,
       contentType: detectedMimeType,
       sizeBytes: buffer.length,
       maxSizeMb: 4,
       uploadMode: 'json-base64',
-      version: '2026-05-24-json-upload',
+      version: '2026-05-24-json-upload-bucket-resolver',
     });
   } catch (error) {
     console.error('[marketing-upload-image-json] failed', error);
