@@ -71,7 +71,13 @@ function validIndustry(value: unknown): Industry | null {
 
 function uniqueStringList(value: unknown) {
   if (!Array.isArray(value)) return null;
-  return Array.from(new Set(value.filter((item): item is string => typeof item === 'string' && item.trim()).map((item) => item.trim())));
+  return Array.from(
+    new Set(
+      value
+        .filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+        .map((item) => item.trim()),
+    ),
+  );
 }
 
 function isAllPagesEnabled(enabledModules: string[]) {
