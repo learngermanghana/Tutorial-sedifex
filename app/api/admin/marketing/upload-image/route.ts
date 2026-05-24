@@ -8,6 +8,13 @@ export const maxDuration = 60;
 const MAX_IMAGE_BYTES = 4 * 1024 * 1024;
 const SUPPORTED_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
 
+type UploadedImageFile = {
+  name?: string;
+  size: number;
+  type?: string;
+  arrayBuffer: () => Promise<ArrayBuffer>;
+};
+
 function cookieValue(req: Request, name: string) {
   return req.headers.get('cookie')?.split(';').map((part) => part.trim()).find((part) => part.startsWith(`${name}=`))?.split('=')[1];
 }
@@ -43,12 +50,24 @@ function firebaseDownloadUrl(bucketName: string, objectName: string, token: stri
 }
 
 function json(payload: Record<string, unknown>, status = 200) {
-  return NextResponse.json(payload, { status });
+  return NextResponse.json(payload, {
+    status,
+    headers: {
+      'cache-control': 'no-store',
+      'x-sedifex-upload-route-version': '2026-05-24-safe-blob-upload',
+    },
+  });
 }
 
 function errorJson(error: unknown, status = 500) {
   const message = error instanceof Error ? error.message : String(error || 'Image upload failed.');
   return json({ ok: false, error: message }, status);
+}
+
+function isUploadedImageFile(value: FormDataEntryValue | null): value is UploadedImageFile {
+  if (!value || typeof value !== 'object') return false;
+  const maybeFile = value as Partial<UploadedImageFile>;
+  return typeof maybeFile.size === 'number' && typeof maybeFile.arrayBuffer === 'function';
 }
 
 export async function GET() {
@@ -59,6 +78,7 @@ export async function GET() {
     field: 'imageFile',
     maxSizeMb: 4,
     supportedTypes: Array.from(SUPPORTED_IMAGE_TYPES),
+    version: '2026-05-24-safe-blob-upload',
   });
 }
 
@@ -69,9 +89,14 @@ export async function POST(req: Request) {
       return json({ ok: false, error: 'Only super_admin, ops_admin, or support can upload marketing images.', currentRole: role || null }, 403);
     }
 
+    const contentType = req.headers.get('content-type') || '';
+    if (!contentType.toLowerCase().includes('multipart/form-data')) {
+      return json({ ok: false, error: 'Upload must use multipart/form-data with form field imageFile.' }, 400);
+    }
+
     const formData = await req.formData();
     const fileValue = formData.get('imageFile');
-    if (!(fileValue instanceof File) || fileValue.size === 0) {
+    if (!isUploadedImageFile(fileValue) || fileValue.size === 0) {
       return json({ ok: false, error: 'No image file was uploaded. Use form field imageFile.' }, 400);
     }
 
@@ -111,6 +136,7 @@ export async function POST(req: Request) {
       contentType: detectedMimeType,
       sizeBytes: fileValue.size,
       maxSizeMb: 4,
+      version: '2026-05-24-safe-blob-upload',
     });
   } catch (error) {
     console.error('[marketing-upload-image] failed', error);
