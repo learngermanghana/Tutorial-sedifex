@@ -80,7 +80,16 @@ function getConfiguredProjectId() {
 
 export function getFirebaseStorageBucketName() {
   const projectId = getConfiguredProjectId();
-  return process.env.FIREBASE_STORAGE_BUCKET || process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || (projectId ? `${projectId}.appspot.com` : null);
+  const rawBucket = process.env.FIREBASE_STORAGE_BUCKET || process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || (projectId ? `${projectId}.appspot.com` : null);
+  if (!rawBucket) return null;
+
+  const bucketName = rawBucket.trim().replace(/^gs:\/\//i, '').replace(/\/+$/, '');
+  if (bucketName.endsWith('.firebasestorage.app')) {
+    const mappedProjectId = bucketName.replace(/\.firebasestorage\.app$/i, '');
+    return `${mappedProjectId}.appspot.com`;
+  }
+
+  return bucketName;
 }
 
 export function getFirebaseEnvStatus(): FirebaseEnvStatus {
