@@ -33,7 +33,7 @@ function roleOptions(contacts: MarketingContact[]) {
 }
 
 function escapeHtml(value: string) {
-  return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+  return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\"/g, '&quot;').replace(/'/g, '&#039;');
 }
 
 function bodyToHtml(value: string, imageUrl?: string) {
@@ -97,6 +97,15 @@ function pretty(value: unknown) {
   } catch {
     return String(value);
   }
+}
+
+function readFileAsDataUrl(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(reader.error || new Error('Unable to read image file.'));
+    reader.readAsDataURL(file);
+  });
 }
 
 export default function MarketingCenterClient({ contacts }: { contacts: MarketingContact[] }) {
@@ -174,12 +183,16 @@ export default function MarketingCenterClient({ contacts }: { contacts: Marketin
     setImageUploading(true);
 
     try {
-      const formData = new FormData();
-      formData.append('imageFile', file);
+      if (file.size > 4 * 1024 * 1024) {
+        setImageUploadError('Image is too large. Maximum upload size is 4 MB. Please compress or resize it first.');
+        return;
+      }
 
-      const response = await fetch('/api/admin/marketing/upload-image', {
+      const dataUrl = await readFileAsDataUrl(file);
+      const response = await fetch('/api/admin/marketing/upload-image-json', {
         method: 'POST',
-        body: formData,
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ fileName: file.name, contentType: file.type, dataUrl }),
       });
 
       const rawResponse = await response.text();
