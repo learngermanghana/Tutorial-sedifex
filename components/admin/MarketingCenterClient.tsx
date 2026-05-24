@@ -1,7 +1,7 @@
 'use client';
 
-import { FormEvent, useMemo, useState } from 'react';
-import { Mail, RefreshCw, Search, Send, Users } from 'lucide-react';
+import { ChangeEvent, FormEvent, useMemo, useState } from 'react';
+import { ImagePlus, Mail, RefreshCw, Search, Send, UploadCloud, Users } from 'lucide-react';
 import type { MarketingContact } from '../../lib/marketing-contacts';
 
 type AudienceMode = 'stores' | 'customers' | 'both';
@@ -15,6 +15,15 @@ type SendResult = {
   response?: unknown;
 } | null;
 
+type UploadResult = {
+  ok?: boolean;
+  imageUrl?: string;
+  imagePath?: string;
+  error?: string;
+  detail?: string;
+  rawResponse?: string;
+};
+
 function sourceOptions(contacts: MarketingContact[]) {
   return Array.from(new Set(contacts.flatMap((contact) => contact.source.split(',')).filter(Boolean))).sort();
 }
@@ -23,11 +32,29 @@ function roleOptions(contacts: MarketingContact[]) {
   return Array.from(new Set(contacts.flatMap((contact) => contact.role.split(',')).filter(Boolean))).sort();
 }
 
-function bodyToHtml(value: string) {
-  return value
+function escapeHtml(value: string) {
+  return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+}
+
+function bodyToHtml(value: string, imageUrl?: string) {
+  const bodyHtml = value
     .split(/\n{2,}/)
-    .map((paragraph) => `<p>${paragraph.replace(/\n/g, '<br />')}</p>`)
+    .map((paragraph) => `<p>${escapeHtml(paragraph).replace(/\n/g, '<br />')}</p>`)
     .join('\n');
+
+  if (!imageUrl) return bodyHtml;
+
+  return `
+    <div style="margin:0 0 22px;overflow:hidden;border-radius:20px;border:1px solid #e2e8f0;background:#f8fafc;">
+      <img src="${escapeHtml(imageUrl)}" alt="Sedifex campaign image" style="display:block;width:100%;max-width:100%;height:auto;border:0;" />
+    </div>
+    ${bodyHtml}
+  `;
+}
+
+function textWithImage(value: string, imageUrl?: string) {
+  if (!imageUrl) return value;
+  return `${value}\n\nCampaign image: ${imageUrl}`;
 }
 
 function parts(value: string) {
@@ -82,6 +109,9 @@ export default function MarketingCenterClient({ contacts }: { contacts: Marketin
   const [selectedEmails, setSelectedEmails] = useState<string[]>([]);
   const [subject, setSubject] = useState('');
   const [body, setBody] = useState('');
+  const [campaignImageUrl, setCampaignImageUrl] = useState('');
+  const [imageUploading, setImageUploading] = useState(false);
+  const [imageUploadError, setImageUploadError] = useState('');
   const [sending, setSending] = useState(false);
   const [result, setResult] = useState<SendResult>(null);
 
@@ -136,6 +166,39 @@ export default function MarketingCenterClient({ contacts }: { contacts: Marketin
     setSelectedEmails([]);
   }
 
+  async function handleImageUpload(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setImageUploadError('');
+    setImageUploading(true);
+
+    try {
+      const formData = new FormData();
+      formData.append('imageFile', file);
+
+      const response = await fetch('/api/admin/marketing/upload-image', {
+        method: 'POST',
+        body: formData,
+      });
+
+      const rawResponse = await response.text();
+      const parsed = parseMaybeJson(rawResponse) as UploadResult | null;
+
+      if (!response.ok || !parsed?.ok || !parsed.imageUrl) {
+        setImageUploadError(parsed?.error || parsed?.detail || rawResponse || `Image upload failed with HTTP ${response.status}.`);
+        return;
+      }
+
+      setCampaignImageUrl(parsed.imageUrl);
+    } catch (error) {
+      setImageUploadError(error instanceof Error ? error.message : 'Image upload failed.');
+    } finally {
+      setImageUploading(false);
+      event.target.value = '';
+    }
+  }
+
   async function handleSend(event: FormEvent) {
     event.preventDefault();
     setResult(null);
@@ -148,8 +211,10 @@ export default function MarketingCenterClient({ contacts }: { contacts: Marketin
         body: JSON.stringify({
           audience,
           subject,
-          text: body,
-          html: bodyToHtml(body),
+          text: textWithImage(body, campaignImageUrl),
+          html: bodyToHtml(body, campaignImageUrl),
+          ctaUrl: audience === 'stores' ? 'https://www.sedifex.com' : 'https://www.sedifexmarket.com',
+          ctaLabel: audience === 'stores' ? 'Update Your Store' : 'Open Sedifex Market',
           recipients: selectedContacts.map((contact) => ({
             name: contact.name,
             email: contact.email,
@@ -214,7 +279,7 @@ export default function MarketingCenterClient({ contacts }: { contacts: Marketin
         <div className="mt-5 grid gap-3 lg:grid-cols-4">
           <div className="lg:col-span-2">
             <label className="text-sm font-medium text-slate-700" htmlFor="marketing-search">Search</label>
-            <div className="mt-2 flex items-center rounded-2xl border border-slate-200 px-3 focus-within:border-indigo-300 focus-within:ring-4 focus-within:ring-indigo-100">
+            <div className="mt-2 flex items-center rounded-2xl border border-slate-200 px-3 focus-within:border-indigo-300 focus-within:ring-4 focus:ring-indigo-100">
               <Search className="h-4 w-4 text-slate-400" />
               <input id="marketing-search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Name, email, phone, tag, store" className="w-full border-0 bg-transparent px-3 py-3 text-sm outline-none" />
             </div>
@@ -284,6 +349,31 @@ export default function MarketingCenterClient({ contacts }: { contacts: Marketin
           <label className="block text-sm font-medium text-slate-700">Subject
             <input value={subject} onChange={(event) => setSubject(event.target.value)} placeholder="Your campaign subject" className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-indigo-300 focus:ring-4 focus:ring-indigo-100" />
           </label>
+
+          <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-4">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="flex items-center gap-2 text-sm font-bold text-slate-800"><ImagePlus className="h-4 w-4" /> Campaign image</p>
+                <p className="mt-1 text-xs leading-5 text-slate-500">Upload a JPG, PNG, WEBP, or GIF. The file is stored in Firebase Storage and only the URL is added to the email.</p>
+              </div>
+              <label className="inline-flex cursor-pointer items-center gap-2 rounded-2xl bg-slate-950 px-4 py-2 text-xs font-bold text-white hover:bg-slate-800">
+                {imageUploading ? <RefreshCw className="h-4 w-4 animate-spin" /> : <UploadCloud className="h-4 w-4" />}
+                {imageUploading ? 'Uploading…' : 'Upload image'}
+                <input type="file" accept="image/jpeg,image/png,image/webp,image/gif" onChange={handleImageUpload} className="hidden" disabled={imageUploading} />
+              </label>
+            </div>
+            {campaignImageUrl ? (
+              <div className="mt-4 overflow-hidden rounded-2xl border border-slate-200 bg-white">
+                <img src={campaignImageUrl} alt="Campaign preview" className="max-h-64 w-full object-cover" />
+                <div className="flex flex-wrap items-center justify-between gap-2 p-3 text-xs text-slate-500">
+                  <span className="break-all">{campaignImageUrl}</span>
+                  <button type="button" onClick={() => setCampaignImageUrl('')} className="font-bold text-rose-600">Remove</button>
+                </div>
+              </div>
+            ) : null}
+            {imageUploadError ? <p className="mt-3 rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-700">{imageUploadError}</p> : null}
+          </div>
+
           <label className="block text-sm font-medium text-slate-700">Message
             <textarea value={body} onChange={(event) => setBody(event.target.value)} rows={12} placeholder="Write your email. Use clear offer, short message, and contact details." className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm leading-6 outline-none focus:border-indigo-300 focus:ring-4 focus:ring-indigo-100" />
           </label>
@@ -292,7 +382,7 @@ export default function MarketingCenterClient({ contacts }: { contacts: Marketin
             Only selected non-opted-out contacts will be sent. Keep marketing messages relevant and include a way to unsubscribe or contact support.
           </div>
 
-          <button disabled={sending || selectedContacts.length === 0} className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-indigo-600 px-5 py-3 text-sm font-bold text-white shadow-sm transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-60">
+          <button disabled={sending || imageUploading || selectedContacts.length === 0} className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-indigo-600 px-5 py-3 text-sm font-bold text-white shadow-sm transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-60">
             {sending ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
             {sending ? 'Sending to Sedifex Apps Script…' : `Send to ${selectedContacts.length} selected ${audience === 'both' ? 'contacts' : audience}`}
           </button>
