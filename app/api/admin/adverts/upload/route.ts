@@ -42,6 +42,10 @@ function firebaseDownloadUrl(bucketName: string, objectName: string, token: stri
   return `https://firebasestorage.googleapis.com/v0/b/${bucketName}/o/${encodeURIComponent(objectName)}?alt=media&token=${encodeURIComponent(token)}`;
 }
 
+function storagePublicUrl(bucketName: string, objectName: string) {
+  return `https://storage.googleapis.com/${bucketName}/${encodeURI(objectName)}`;
+}
+
 function getUploadedImageFile(value: FormDataEntryValue | null): UploadedImageFile | null {
   if (!value || typeof value !== 'object') return null;
   const maybeFile = value as unknown as Partial<UploadedImageFile>;
@@ -50,8 +54,17 @@ function getUploadedImageFile(value: FormDataEntryValue | null): UploadedImageFi
     name: typeof maybeFile.name === 'string' ? maybeFile.name : 'advert-image',
     size: maybeFile.size,
     type: typeof maybeFile.type === 'string' ? maybeFile.type : undefined,
-    arrayBuffer: maybeFile.arrayBuffer,
+    arrayBuffer: () => maybeFile.arrayBuffer!.call(value),
   };
+}
+
+async function makePublicIfAllowed(target: { makePublic: () => Promise<unknown> }) {
+  try {
+    await target.makePublic();
+    return { public: true, error: null as string | null };
+  } catch (error) {
+    return { public: false, error: error instanceof Error ? error.message : 'Unable to make object public.' };
+  }
 }
 
 export async function GET() {
@@ -61,7 +74,7 @@ export async function GET() {
     method: 'POST',
     field: 'imageFile',
     maxSizeMb: 5,
-    version: '2026-05-24-firebase-download-url',
+    version: '2026-05-24-public-advert-upload',
   });
 }
 
@@ -106,14 +119,22 @@ export async function POST(request: Request) {
       },
     });
 
+    const publicResult = await makePublicIfAllowed(target);
+    const publicUrl = storagePublicUrl(bucketName, objectName);
+    const tokenUrl = firebaseDownloadUrl(bucketName, objectName, downloadToken);
+
     return NextResponse.json({
       success: true,
       ok: true,
-      imageUrl: firebaseDownloadUrl(bucketName, objectName, downloadToken),
+      imageUrl: publicResult.public ? publicUrl : tokenUrl,
+      publicUrl,
+      tokenUrl,
       imagePath: objectName,
       bucketName,
+      isPublic: publicResult.public,
+      publicError: publicResult.error,
       triedBuckets: candidates,
-      version: '2026-05-24-firebase-download-url',
+      version: '2026-05-24-public-advert-upload',
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error || 'Image upload failed.');
