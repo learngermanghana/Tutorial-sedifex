@@ -78,6 +78,13 @@ function productPrice(item: RawItem) {
   return value;
 }
 
+function getStoreId(item: RawItem) {
+  const direct = text(item, ['storeId', 'ownerStoreId', 'businessId', 'tenantStoreId', 'merchantId', 'merchant_id'], '');
+  if (direct) return direct;
+  const nestedStore = asRecord(item.store) || asRecord(item.merchant) || asRecord(item.business);
+  return nestedStore ? text(nestedStore, ['id', 'storeId', 'merchantId', 'businessId'], '') : '';
+}
+
 function storeName(item: RawItem, verifiedStoreMap?: Map<string, StoreRecord>) {
   const storeId = getStoreId(item);
   const verifiedStore = storeId ? verifiedStoreMap?.get(storeId) : null;
@@ -92,13 +99,6 @@ function storeName(item: RawItem, verifiedStoreMap?: Map<string, StoreRecord>) {
   return 'Verified Ghana store';
 }
 
-function getStoreId(item: RawItem) {
-  const direct = text(item, ['storeId', 'ownerStoreId', 'businessId', 'tenantStoreId', 'merchantId', 'merchant_id'], '');
-  if (direct) return direct;
-  const nestedStore = asRecord(item.store) || asRecord(item.merchant) || asRecord(item.business);
-  return nestedStore ? text(nestedStore, ['id', 'storeId', 'merchantId', 'businessId'], '') : '';
-}
-
 function storeIsVerified(store: StoreRecord) {
   if (boolValue(store, ['isVerified', 'verified', 'storeVerified', 'marketplaceVerified', 'approved', 'isApproved'])) return true;
 
@@ -109,13 +109,16 @@ function storeIsVerified(store: StoreRecord) {
   return ['verified', 'approved', 'active', 'live'].includes(status);
 }
 
-function buildVerifiedStoreMap(stores: RawItem[]) {
-  return new Map(
-    stores
-      .filter(storeIsVerified)
-      .map((store) => [String(store.id || text(store, ['storeId', 'merchantId', 'businessId'], '')), store])
-      .filter(([storeId]) => storeId)
-  );
+function buildVerifiedStoreMap(stores: RawItem[]): Map<string, StoreRecord> {
+  const entries = stores
+    .filter(storeIsVerified)
+    .map((store): [string, StoreRecord] => [
+      String(store.id || text(store, ['storeId', 'merchantId', 'businessId'], '')),
+      store,
+    ])
+    .filter((entry): entry is [string, StoreRecord] => Boolean(entry[0]));
+
+  return new Map<string, StoreRecord>(entries);
 }
 
 function isQualityProduct(item: RawItem) {
