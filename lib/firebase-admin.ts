@@ -86,9 +86,6 @@ export function getFirebaseStorageBucketName() {
   const projectId = getConfiguredProjectId();
   const configuredBucket = process.env.FIREBASE_STORAGE_BUCKET || process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET;
 
-  // Important: use the exact bucket value from Vercel/Firebase.
-  // New Firebase projects can use project-id.firebasestorage.app, while older
-  // ones often use project-id.appspot.com. Do not rewrite one format into the other.
   if (configuredBucket) return cleanBucketName(configuredBucket);
 
   return projectId ? `${projectId}.appspot.com` : null;
@@ -155,9 +152,23 @@ function normalizeDocument(snapshot: FirebaseFirestore.DocumentSnapshot) {
   return normalizeFirestoreDocument(snapshot);
 }
 
+function safeReadLimit(limit: number) {
+  return Math.min(Math.max(limit, 1), 1000);
+}
+
 export async function listFirestoreDocuments(collectionPath: string, limit = 25) {
-  const safeLimit = Math.min(Math.max(limit, 1), 100);
+  const safeLimit = safeReadLimit(limit);
   const snapshot = await firestore().collection(collectionPath).limit(safeLimit).get();
+
+  return {
+    documents: snapshot.docs.map(normalizeDocument),
+    nextPageToken: null,
+  };
+}
+
+export async function listFirestoreCollectionGroupDocuments(collectionId: string, limit = 500) {
+  const safeLimit = safeReadLimit(limit);
+  const snapshot = await firestore().collectionGroup(collectionId).limit(safeLimit).get();
 
   return {
     documents: snapshot.docs.map(normalizeDocument),
