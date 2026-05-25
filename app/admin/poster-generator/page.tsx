@@ -1,5 +1,6 @@
 import { Megaphone } from 'lucide-react';
-import PosterGeneratorClientV2, { type PosterProduct } from '../../../components/admin/PosterGeneratorClientV2';
+import PosterGeneratorClientV2 from '../../../components/admin/PosterGeneratorClientV2';
+import type { PosterProduct } from '../../../components/admin/PosterGeneratorClient';
 import { SectionCard } from '../../../components/admin/ui';
 import { getFirebaseEnvStatus, listFirestoreDocuments } from '../../../lib/firebase-admin';
 
