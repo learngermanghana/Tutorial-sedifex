@@ -99,6 +99,7 @@ function productCardSvg(product: PosterProduct, x: number, y: number, width: num
 }
 
 function buildBigDealsSvg(product: PosterProduct, message: string) {
+  const safeStore = escapeSvg(product.storeName);
   const safeName = escapeSvg(product.name);
   const safePrice = escapeSvg(product.price || 'Shop now');
   const safeMessage = escapeSvg(message);
@@ -129,7 +130,8 @@ function buildBigDealsSvg(product: PosterProduct, message: string) {
     <ellipse cx="725" cy="1060" rx="250" ry="42" fill="#ffffff" opacity="0.94"/>
     <rect x="545" y="245" width="370" height="570" rx="36" fill="#ffffff" opacity="0.96" filter="url(#shadow)"/>
     <image href="${product.imageUrl}" x="565" y="270" width="330" height="520" preserveAspectRatio="xMidYMid meet"/>
-    <text x="560" y="865" text-anchor="middle" font-size="34" font-weight="900" fill="#ffffff" opacity="0.92">${safeName}</text>
+    <text x="725" y="858" text-anchor="middle" font-size="34" font-weight="900" fill="#ffffff" opacity="0.92">${safeName}</text>
+    <text x="725" y="895" text-anchor="middle" font-size="25" font-weight="700" fill="#fff7ed" opacity="0.95">${safeStore}</text>
     <text x="725" y="965" text-anchor="middle" font-size="58" font-weight="950" fill="#ffffff">${safePrice}</text>
     <text x="725" y="1016" text-anchor="middle" font-size="28" font-weight="800" fill="#fff7ed">${safeMessage}</text>
     <rect x="828" y="920" width="165" height="205" rx="22" fill="#ffffff"/><image href="${qr}" x="845" y="938" width="132" height="132"/><text x="910" y="1100" text-anchor="middle" font-size="18" font-weight="950" fill="#064e3b">SCAN TO BUY</text>
