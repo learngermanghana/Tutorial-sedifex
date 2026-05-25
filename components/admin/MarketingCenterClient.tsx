@@ -36,6 +36,7 @@ type ProductPick = {
   productUrl: string;
   category: string;
   score: number;
+  verificationSource?: string;
 };
 
 type ProductPicksResponse = {
@@ -45,6 +46,22 @@ type ProductPicksResponse = {
   scanned?: number;
   eligible?: number;
 };
+
+type MarketingLink = { label: string; url: string };
+
+const REQUIRED_SEDIFEX_LINKS: MarketingLink[] = [
+  { label: 'Shop', url: 'https://www.sedifexmarket.com/products' },
+  { label: 'Support', url: 'https://www.sedifexmarket.com/contact' },
+  { label: 'Delivery info', url: 'https://www.sedifexmarket.com/shipping-delivery-policy' },
+  { label: 'Returns', url: 'https://www.sedifexmarket.com/return-refund-policy' },
+];
+
+const SOCIAL_LINKS: MarketingLink[] = [
+  { label: 'Instagram', url: process.env.NEXT_PUBLIC_SEDIFEX_INSTAGRAM_URL || '' },
+  { label: 'Facebook', url: process.env.NEXT_PUBLIC_SEDIFEX_FACEBOOK_URL || '' },
+  { label: 'TikTok', url: process.env.NEXT_PUBLIC_SEDIFEX_TIKTOK_URL || '' },
+  { label: 'WhatsApp', url: process.env.NEXT_PUBLIC_SEDIFEX_WHATSAPP_URL || '' },
+].filter((item) => item.url.trim());
 
 function sourceOptions(contacts: MarketingContact[]) {
   return Array.from(new Set(contacts.flatMap((contact) => contact.source.split(',')).filter(Boolean))).sort();
@@ -130,13 +147,40 @@ function readFileAsDataUrl(file: File) {
   });
 }
 
+function sedifexFooterText() {
+  const required = REQUIRED_SEDIFEX_LINKS.map((item) => `${item.label}: ${item.url}`).join('\n');
+  const socials = SOCIAL_LINKS.length > 0
+    ? `\n\nFollow Sedifex Market:\n${SOCIAL_LINKS.map((item) => `${item.label}: ${item.url}`).join('\n')}`
+    : '';
+  return `\n\nNeed help or want to follow us?\n${required}${socials}`;
+}
+
+function sedifexFooterHtml() {
+  const requiredButtons = REQUIRED_SEDIFEX_LINKS.map((item) => `
+    <a href="${escapeHtml(item.url)}" style="display:inline-block;margin:4px;background:#ffffff;color:#111827;text-decoration:none;border:1px solid #e2e8f0;border-radius:999px;padding:9px 13px;font-size:12px;font-weight:900;">${escapeHtml(item.label)}</a>
+  `).join('');
+
+  const socialButtons = SOCIAL_LINKS.map((item) => `
+    <a href="${escapeHtml(item.url)}" style="display:inline-block;margin:4px;background:#111827;color:#ffffff;text-decoration:none;border-radius:999px;padding:9px 13px;font-size:12px;font-weight:900;">${escapeHtml(item.label)}</a>
+  `).join('');
+
+  return `
+    <div style="margin-top:22px;border-radius:22px;background:#0f172a;padding:20px;text-align:center;">
+      <p style="margin:0 0 8px;font-size:15px;line-height:22px;color:#ffffff;font-weight:900;">Shop with clarity on Sedifex Market</p>
+      <p style="margin:0 0 14px;font-size:13px;line-height:20px;color:#cbd5e1;">Follow us, contact support, and read delivery or return information before you buy.</p>
+      <div style="margin-bottom:${socialButtons ? '12px' : '0'};">${requiredButtons}</div>
+      ${socialButtons ? `<p style="margin:10px 0 6px;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:#ffbd3d;font-weight:900;">Follow us</p><div>${socialButtons}</div>` : ''}
+    </div>
+  `;
+}
+
 function buildProductEmailText(products: ProductPick[]) {
   const productLines = products.map((product, index) => `${index + 1}. ${product.name}\nPrice: ${product.price}\nStore: ${product.storeName}\nShop now: ${product.productUrl}`).join('\n\n');
-  return `Hello {{name}},\n\nFresh products from verified Ghana stores are available on Sedifex Market today.\n\n${productLines}\n\nWhy shop on Sedifex Market?\n\n• Products from verified stores\n• Clear product, price, and seller details\n• Secure checkout records and receipts\n• Delivery or pickup information before you buy\n\nBrowse more products here:\nhttps://www.sedifexmarket.com/products\n\nShop with clarity.\n\nSedifex Team\nhttps://www.sedifexmarket.com`;
+  return `Hello {{name}},\n\nFresh products from verified Ghana stores are available on Sedifex Market today.\n\n${productLines}\n\nWhy shop on Sedifex Market?\n\n• Products from verified stores\n• Clear product, price, and seller details\n• Secure checkout records and receipts\n• Delivery or pickup information before you buy\n\nBrowse more products here:\nhttps://www.sedifexmarket.com/products\n\nShop with clarity.\n\nSedifex Team\nhttps://www.sedifexmarket.com${sedifexFooterText()}`;
 }
 
 function buildProductEmailHtml(products: ProductPick[]) {
-  const cards = products.map((product) => `
+  const cardCells = products.map((product) => `
     <td style="width:50%;padding:8px;vertical-align:top;">
       <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border:1px solid #e2e8f0;border-radius:18px;overflow:hidden;background:#ffffff;">
         <tr>
@@ -157,14 +201,13 @@ function buildProductEmailHtml(products: ProductPick[]) {
         </tr>
       </table>
     </td>
-  `).join('');
+  `);
 
-  const rows = products.reduce<string[]>((acc, _, index) => {
-    if (index % 2 === 0) acc.push(cards.split('</td>').slice(index, index + 2).map((item) => item ? `${item}</td>` : '').join(''));
-    return acc;
-  }, []);
-
-  const productRows = rows.map((row) => `<tr>${row}</tr>`).join('');
+  const productRows = Array.from({ length: Math.ceil(cardCells.length / 2) }, (_, rowIndex) => {
+    const cells = cardCells.slice(rowIndex * 2, rowIndex * 2 + 2).join('');
+    const filler = cardCells.length % 2 === 1 && rowIndex === Math.floor(cardCells.length / 2) ? '<td style="width:50%;padding:8px;vertical-align:top;"></td>' : '';
+    return `<tr>${cells}${filler}</tr>`;
+  }).join('');
 
   return `
     <div style="margin:0 auto;max-width:680px;background:#ffffff;color:#111827;font-family:Arial,Helvetica,sans-serif;">
@@ -190,7 +233,9 @@ function buildProductEmailHtml(products: ProductPick[]) {
         <a href="https://www.sedifexmarket.com/products" style="display:inline-block;background:#ff7a00;color:#ffffff;text-decoration:none;border-radius:999px;padding:13px 22px;font-size:14px;font-weight:900;">Browse more products</a>
       </p>
 
-      <p style="font-size:13px;line-height:20px;color:#64748b;">Sedifex Team<br />https://www.sedifexmarket.com</p>
+      ${sedifexFooterHtml()}
+
+      <p style="font-size:13px;line-height:20px;color:#64748b;text-align:center;">Sedifex Team<br />https://www.sedifexmarket.com</p>
     </div>
   `;
 }
@@ -324,7 +369,7 @@ export default function MarketingCenterClient({ contacts }: { contacts: Marketin
       setBody(buildProductEmailText(products));
       setCustomHtml(buildProductEmailHtml(products));
       setCampaignImageUrl('');
-      setProductGenerateMessage(`Generated email with ${products.length} verified-store products. Scanned ${parsed.scanned ?? 0}, eligible ${parsed.eligible ?? products.length}. Review before sending.`);
+      setProductGenerateMessage(`Generated email with ${products.length} verified-store products and Sedifex footer links. Scanned ${parsed.scanned ?? 0}, eligible ${parsed.eligible ?? products.length}. Review before sending.`);
     } catch (error) {
       setProductGenerateMessage(error instanceof Error ? error.message : 'Unable to generate product email.');
     } finally {
@@ -526,7 +571,7 @@ export default function MarketingCenterClient({ contacts }: { contacts: Marketin
             <textarea value={body} onChange={(event) => { setBody(event.target.value); setCustomHtml(''); }} rows={12} placeholder="Write your email. Use clear offer, short message, and contact details." className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm leading-6 outline-none focus:border-indigo-300 focus:ring-4 focus:ring-indigo-100" />
           </label>
 
-          {customHtml ? <p className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-xs font-semibold leading-5 text-emerald-800">A product-card HTML email has been generated. Editing the message text will remove the product-card layout and send the plain paragraph layout instead.</p> : null}
+          {customHtml ? <p className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-xs font-semibold leading-5 text-emerald-800">A product-card HTML email has been generated with product cards and a Sedifex social/contact footer. Editing the message text will remove the product-card layout and send the plain paragraph layout instead.</p> : null}
 
           <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-800">
             Only selected non-opted-out contacts will be sent. Keep marketing messages relevant and include a way to unsubscribe or contact support.
