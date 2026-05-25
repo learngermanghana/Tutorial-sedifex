@@ -14,6 +14,7 @@ const titleMap: Record<string, { title: string; description: string }> = {
   '/admin/stores': { title: 'Stores', description: 'Manage tenant stores, plans, status, and storefront operations.' },
   '/admin/customers': { title: 'Customers', description: 'See customer records across stores, with contact details, store links, and order history.' },
   '/admin/products': { title: 'Catalog Review', description: 'Inspect Sedifex product, service, and course readiness.' },
+  '/admin/poster-generator': { title: 'Poster Generator', description: 'Create branded Sedifex Market product posters with QR codes in one click.' },
   '/admin/google-sync': { title: 'Google Sync', description: 'Approve, block, and review products before they reach Google Merchant Center.' },
   '/admin/catalog-repair': { title: 'Catalog Repair', description: 'Rebuild public marketplace listings for each store.' },
   '/admin/orders': { title: 'Orders', description: 'Monitor integration orders, payments, buyers, and source channels.' },
