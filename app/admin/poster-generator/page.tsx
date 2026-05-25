@@ -8,6 +8,8 @@ export const runtime = 'nodejs';
 
 type RawItem = Record<string, unknown> & { id?: string; path?: string };
 
+type StoreRecord = RawItem;
+
 type CollectionRead = {
   ok: boolean;
   error: string | null;
@@ -21,6 +23,23 @@ function text(record: Record<string, unknown>, fields: string[], fallback = '') 
     if (typeof value === 'number') return String(value);
   }
   return fallback;
+}
+
+function boolValue(record: Record<string, unknown>, fields: string[]) {
+  for (const field of fields) {
+    const value = record[field];
+    if (typeof value === 'boolean') return value;
+    if (typeof value === 'string') {
+      const normalized = value.trim().toLowerCase();
+      if (['true', 'yes', 'verified', 'approved', 'active', 'live'].includes(normalized)) return true;
+      if (['false', 'no', 'pending', 'rejected', 'blocked', 'draft'].includes(normalized)) return false;
+    }
+  }
+  return false;
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
 }
 
 function firstImage(item: RawItem) {
@@ -59,7 +78,11 @@ function productPrice(item: RawItem) {
   return value;
 }
 
-function storeName(item: RawItem) {
+function storeName(item: RawItem, verifiedStoreMap?: Map<string, StoreRecord>) {
+  const storeId = getStoreId(item);
+  const verifiedStore = storeId ? verifiedStoreMap?.get(storeId) : null;
+  if (verifiedStore) return text(verifiedStore, ['storeName', 'name', 'businessName', 'displayName', 'merchantName', 'id'], 'Verified Ghana store');
+
   const direct = text(item, ['storeName', 'merchantName', 'businessName', 'sellerName'], '');
   if (direct) return direct;
   const store = item.store;
@@ -69,9 +92,44 @@ function storeName(item: RawItem) {
   return 'Verified Ghana store';
 }
 
+function getStoreId(item: RawItem) {
+  const direct = text(item, ['storeId', 'ownerStoreId', 'businessId', 'tenantStoreId', 'merchantId', 'merchant_id'], '');
+  if (direct) return direct;
+  const nestedStore = asRecord(item.store) || asRecord(item.merchant) || asRecord(item.business);
+  return nestedStore ? text(nestedStore, ['id', 'storeId', 'merchantId', 'businessId'], '') : '';
+}
+
+function storeIsVerified(store: StoreRecord) {
+  if (boolValue(store, ['isVerified', 'verified', 'storeVerified', 'marketplaceVerified', 'approved', 'isApproved'])) return true;
+
+  const verification = asRecord(store.verification) || asRecord(store.marketplaceVerification) || asRecord(store.sedifexVerification);
+  if (verification && boolValue(verification, ['verified', 'isVerified', 'approved', 'isApproved'])) return true;
+
+  const status = text(store, ['verificationStatus', 'approvalStatus', 'marketplaceStatus', 'status', 'state'], '').toLowerCase();
+  return ['verified', 'approved', 'active', 'live'].includes(status);
+}
+
+function buildVerifiedStoreMap(stores: RawItem[]) {
+  return new Map(
+    stores
+      .filter(storeIsVerified)
+      .map((store) => [String(store.id || text(store, ['storeId', 'merchantId', 'businessId'], '')), store])
+      .filter(([storeId]) => storeId)
+  );
+}
+
+function isQualityProduct(item: RawItem) {
+  const name = text(item, ['name', 'title', 'productName', 'serviceName', 'courseName'], '');
+  const price = productPrice(item);
+  const image = firstImage(item);
+  const hiddenStatus = text(item, ['status', 'visibility', 'state'], '').toLowerCase();
+  const isHidden = ['hidden', 'draft', 'inactive', 'blocked', 'rejected'].includes(hiddenStatus);
+  return Boolean(name && price && image && !isHidden);
+}
+
 async function readCollection(collectionPath: string): Promise<CollectionRead> {
   try {
-    const result = await listFirestoreDocuments(collectionPath, 120);
+    const result = await listFirestoreDocuments(collectionPath, 160);
     return { ok: true, error: null, documents: result.documents as RawItem[] };
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : `Unable to read ${collectionPath}.`, documents: [] };
@@ -80,9 +138,11 @@ async function readCollection(collectionPath: string): Promise<CollectionRead> {
 
 async function loadProducts() {
   const env = getFirebaseEnvStatus();
-  if (!env.ready) return { ready: false, products: [] as PosterProduct[], error: 'Firebase environment variables are not ready in this deployment.' };
+  if (!env.ready) return { ready: false, products: [] as PosterProduct[], error: 'Firebase environment variables are not ready in this deployment.', verifiedStores: 0, scannedProducts: 0 };
 
-  const [products, publicProducts, catalogItems, services, courses] = await Promise.all([
+  const [stores, storeSettings, products, publicProducts, catalogItems, services, courses] = await Promise.all([
+    readCollection('stores'),
+    readCollection('storeSettings'),
     readCollection('products'),
     readCollection('publicProducts'),
     readCollection('catalogItems'),
@@ -90,11 +150,20 @@ async function loadProducts() {
     readCollection('courses'),
   ]);
 
-  const errors = [products, publicProducts, catalogItems, services, courses].filter((result) => !result.ok && result.error).map((result) => result.error).filter(Boolean) as string[];
+  const errors = [stores, storeSettings, products, publicProducts, catalogItems, services, courses]
+    .filter((result) => !result.ok && result.error)
+    .map((result) => result.error)
+    .filter(Boolean) as string[];
+
+  const verifiedStoreMap = buildVerifiedStoreMap([...stores.documents, ...storeSettings.documents]);
   const seen = new Set<string>();
   const combined = [...publicProducts.documents, ...products.documents, ...catalogItems.documents, ...services.documents, ...courses.documents];
 
   const mapped = combined
+    .filter((item) => {
+      const storeId = getStoreId(item);
+      return Boolean(storeId && verifiedStoreMap.has(storeId) && isQualityProduct(item));
+    })
     .map((item): PosterProduct => {
       const name = text(item, ['name', 'title', 'productName', 'serviceName', 'courseName'], 'Untitled product');
       const id = text(item, ['id', 'productId', 'itemId', 'listingId'], name);
@@ -104,7 +173,7 @@ async function loadProducts() {
         price: productPrice(item),
         imageUrl: firstImage(item),
         productUrl: productUrl(item, name),
-        storeName: storeName(item),
+        storeName: storeName(item, verifiedStoreMap),
         category: text(item, ['category', 'categoryName', 'type', 'itemType'], 'Product'),
       };
     })
@@ -115,7 +184,17 @@ async function loadProducts() {
       return true;
     });
 
-  return { ready: true, products: mapped, error: errors[0] || null };
+  const verifiedWarning = verifiedStoreMap.size === 0
+    ? 'No verified stores were detected yet. Mark stores as verified/approved/active so their quality products appear here.'
+    : null;
+
+  return {
+    ready: true,
+    products: mapped,
+    error: verifiedWarning || errors[0] || null,
+    verifiedStores: verifiedStoreMap.size,
+    scannedProducts: combined.length,
+  };
 }
 
 export default async function PosterGeneratorPage() {
@@ -128,11 +207,16 @@ export default async function PosterGeneratorPage() {
           <Megaphone className="h-4 w-4" /> Sedifex Market Poster Generator
         </div>
         <h2 className="mt-5 max-w-3xl text-3xl font-bold tracking-tight sm:text-4xl">
-          Create branded product posters with QR codes from inventory.
+          Create branded product posters from verified store products.
         </h2>
         <p className="mt-4 max-w-2xl text-sm leading-7 text-slate-300">
-          Pick a product, auto-fill the Sedifex Market link, generate a QR code, copy a caption, and download a ready-to-post SVG flyer.
+          The generator now filters for verified stores and quality products with names, prices, images, and active visibility before allowing poster creation.
         </p>
+        <div className="mt-5 flex flex-wrap gap-3 text-xs font-semibold text-slate-200">
+          <span className="rounded-full border border-white/10 bg-white/10 px-3 py-1">Verified stores: {data.verifiedStores}</span>
+          <span className="rounded-full border border-white/10 bg-white/10 px-3 py-1">Scanned items: {data.scannedProducts}</span>
+          <span className="rounded-full border border-white/10 bg-white/10 px-3 py-1">Poster-ready: {data.products.length}</span>
+        </div>
       </section>
 
       {data.error ? (
