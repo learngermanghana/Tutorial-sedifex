@@ -32,6 +32,7 @@ const groups: { label: string; items: Item[] }[] = [
       { href: '/admin/stores', label: 'Stores', icon: Store },
       { href: '/admin/customers', label: 'Customers', icon: Users },
       { href: '/admin/products', label: 'Catalog Review', icon: Package },
+      { href: '/admin/poster-generator', label: 'Poster Generator', icon: Megaphone },
       { href: '/admin/google-sync', label: 'Google Sync', icon: PackageCheck },
       { href: '/admin/catalog-sync', label: 'Catalog Sync', icon: Hammer },
       { href: '/admin/orders', label: 'Orders', icon: ShoppingBag },
