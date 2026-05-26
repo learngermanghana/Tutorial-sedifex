@@ -18,6 +18,7 @@ import {
   ShoppingBag,
   Store,
   Users,
+  WalletCards,
   Webhook,
   X,
 } from 'lucide-react';
@@ -36,6 +37,7 @@ const groups: { label: string; items: Item[] }[] = [
       { href: '/admin/google-sync', label: 'Google Sync', icon: PackageCheck },
       { href: '/admin/catalog-sync', label: 'Catalog Sync', icon: Hammer },
       { href: '/admin/orders', label: 'Orders', icon: ShoppingBag },
+      { href: '/admin/settlements', label: 'Settlements', icon: WalletCards },
       { href: '/admin/analytics', label: 'Analytics', icon: BarChart3 },
     ],
   },
