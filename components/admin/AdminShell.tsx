@@ -18,6 +18,7 @@ const titleMap: Record<string, { title: string; description: string }> = {
   '/admin/google-sync': { title: 'Google Sync', description: 'Approve, block, and review products before they reach Google Merchant Center.' },
   '/admin/catalog-repair': { title: 'Catalog Repair', description: 'Rebuild public marketplace listings for each store.' },
   '/admin/orders': { title: 'Orders', description: 'Monitor integration orders, payments, buyers, and source channels.' },
+  '/admin/settlements': { title: 'Settlements', description: 'Track manual store payouts when Paystack split settlement is pending or unavailable.' },
   '/admin/checkout-health': { title: 'Checkout Health', description: 'Diagnose store setup, payment, environment, and webhook issues.' },
   '/admin/deliveries': { title: 'Webhook Deliveries', description: 'Inspect real webhook deliveries, failures, retries, and replay actions.' },
   '/admin/live-chat': { title: 'Live Chat', description: 'Reply to Sedifex Market visitor messages and manage support conversations.' },
