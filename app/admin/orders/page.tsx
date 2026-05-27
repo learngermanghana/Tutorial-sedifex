@@ -36,11 +36,20 @@ type OrderRecord = {
   final_total?: number;
   paymentStatus?: string;
   orderStatus?: string;
+  bookingStatus?: string;
   fulfillmentStatus?: string;
   deliveryStatus?: string;
   fulfillmentType?: string;
+  paymentCollectionMode?: string;
+  paymentMethod?: string;
+  paymentProvider?: string;
+  recordType?: string;
+  orderType?: string;
+  storeOnly?: boolean;
+  cashConfirmed?: boolean;
   paymentUpdatedAt?: unknown;
   deliveredAt?: unknown;
+  completedAt?: unknown;
   cancelledAt?: unknown;
   customerEmail?: string;
   customerName?: string;
@@ -49,11 +58,19 @@ type OrderRecord = {
   items?: OrderItem[];
   itemCount?: number | string;
   lastPaymentMetadata?: { itemCount?: string | number };
+  metadata?: Record<string, unknown>;
   statusHistory?: unknown[];
 };
 
 type Bucket = 'all' | 'new' | 'accepted' | 'preparing' | 'out_for_delivery' | 'delivered' | 'problem' | 'delayed';
-type StatusAction = 'received' | 'preparing' | 'out_for_delivery' | 'delivered';
+type StatusAction = 'received' | 'preparing' | 'out_for_delivery' | 'delivered' | 'confirm_service' | 'service_in_progress' | 'service_completed' | 'complete_manual';
+type OrderKind = 'product' | 'service' | 'manual';
+
+type ActionOption = {
+  id: StatusAction;
+  label: string;
+  tone: 'slate' | 'purple' | 'blue' | 'emerald' | 'amber';
+};
 
 const POLL_MS = 20000;
 const BUCKET_LABELS: Record<Bucket, string> = {
@@ -62,17 +79,38 @@ const BUCKET_LABELS: Record<Bucket, string> = {
   accepted: 'Accepted',
   preparing: 'Preparing',
   out_for_delivery: 'Out for delivery',
-  delivered: 'Delivered',
+  delivered: 'Delivered / completed',
   problem: 'Problem',
   delayed: 'Delayed',
 };
 
 const STATUS_ACTION_LABELS: Record<StatusAction, string> = {
-  received: 'Received',
+  received: 'Accept order',
   preparing: 'Preparing',
   out_for_delivery: 'Out for delivery',
   delivered: 'Delivered',
+  confirm_service: 'Confirm booking',
+  service_in_progress: 'Service started',
+  service_completed: 'Service completed',
+  complete_manual: 'Mark completed',
 };
+
+const PRODUCT_ACTIONS: ActionOption[] = [
+  { id: 'received', label: 'Accept order', tone: 'slate' },
+  { id: 'preparing', label: 'Preparing', tone: 'purple' },
+  { id: 'out_for_delivery', label: 'Out for delivery', tone: 'blue' },
+  { id: 'delivered', label: 'Delivered', tone: 'emerald' },
+];
+
+const SERVICE_ACTIONS: ActionOption[] = [
+  { id: 'confirm_service', label: 'Confirm booking', tone: 'slate' },
+  { id: 'service_in_progress', label: 'Service started', tone: 'blue' },
+  { id: 'service_completed', label: 'Service completed', tone: 'emerald' },
+];
+
+const MANUAL_ACTIONS: ActionOption[] = [
+  { id: 'complete_manual', label: 'Mark completed', tone: 'emerald' },
+];
 
 function clean(value: unknown, fallback = '') {
   if (typeof value === 'string') return value.trim() || fallback;
@@ -161,24 +199,60 @@ function storeLabel(order: OrderRecord) {
 }
 
 function statusText(order: OrderRecord) {
-  const parts = [order.orderStatus, order.fulfillmentStatus, order.deliveryStatus, order.paymentStatus]
+  const parts = [order.orderStatus, order.bookingStatus, order.fulfillmentStatus, order.deliveryStatus, order.paymentStatus]
     .map((value) => clean(value))
     .filter(Boolean);
   return parts.length ? parts.join(' / ') : 'No status';
 }
 
+function itemKindText(item?: OrderItem) {
+  return lower(item?.item_type || item?.type);
+}
+
+function orderKind(order: OrderRecord): OrderKind {
+  const combined = [
+    order.recordType,
+    order.orderType,
+    order.fulfillmentType,
+    order.sourceChannel,
+    order.source,
+    order.paymentCollectionMode,
+    order.paymentMethod,
+    order.paymentProvider,
+    ...(order.items || []).flatMap((item) => [item.item_type, item.type, item.serviceName]),
+  ].map((value) => lower(value)).join(' ');
+
+  if (order.storeOnly || /manual_cash|manual|quick_pay_cash|cash/.test(combined)) return 'manual';
+  if (/service|booking|appointment|course|student_registration|donation/.test(combined)) return 'service';
+  return 'product';
+}
+
+function kindLabel(kind: OrderKind) {
+  if (kind === 'manual') return 'Manual / cash entry';
+  if (kind === 'service') return 'Service / booking';
+  return 'Product order';
+}
+
+function actionsForOrder(order: OrderRecord): ActionOption[] {
+  const kind = orderKind(order);
+  if (kind === 'manual') return MANUAL_ACTIONS;
+  if (kind === 'service') return SERVICE_ACTIONS;
+  return PRODUCT_ACTIONS;
+}
+
 function bucketFor(order: OrderRecord): Bucket {
   const orderStatus = lower(order.orderStatus);
+  const bookingStatus = lower(order.bookingStatus);
   const fulfillmentStatus = lower(order.fulfillmentStatus);
   const deliveryStatus = lower(order.deliveryStatus);
   const paymentStatus = lower(order.paymentStatus);
-  const combined = [orderStatus, fulfillmentStatus, deliveryStatus, paymentStatus].join(' ');
+  const combined = [orderStatus, bookingStatus, fulfillmentStatus, deliveryStatus, paymentStatus].join(' ');
 
   if (/cancel|refund|failed|problem|dispute|delivery_failed/.test(combined)) return 'problem';
-  if (deliveryStatus.includes('delivered') || orderStatus.includes('delivered') || fulfillmentStatus.includes('completed') || order.deliveredAt) return 'delivered';
+  if (deliveryStatus.includes('delivered') || orderStatus.includes('delivered') || orderStatus.includes('completed') || fulfillmentStatus.includes('completed') || order.deliveredAt || order.completedAt) return 'delivered';
   if (deliveryStatus.includes('out_for_delivery') || deliveryStatus.includes('in_transit')) return 'out_for_delivery';
   if (/prepar|pack|processing/.test(combined)) return 'preparing';
-  if (/accepted|confirmed_by_store|ready_for_pickup/.test(combined)) return 'accepted';
+  if (/accepted|confirmed_by_store|booking_confirmed|service_in_progress|ready_for_pickup/.test(combined)) return 'accepted';
   if (/paid|success|successful|confirmed/.test(combined)) return 'new';
   return 'new';
 }
@@ -215,6 +289,14 @@ function bucketIcon(bucket: Bucket) {
   return <Clock3 className="h-4 w-4" />;
 }
 
+function actionToneClass(tone: ActionOption['tone']) {
+  if (tone === 'emerald') return 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100';
+  if (tone === 'blue') return 'border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100';
+  if (tone === 'purple') return 'border-purple-200 bg-purple-50 text-purple-700 hover:bg-purple-100';
+  if (tone === 'amber') return 'border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100';
+  return 'border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100';
+}
+
 function csvCell(value: string | number) {
   const safe = String(value ?? '').replaceAll('"', '""');
   return `"${safe}"`;
@@ -233,6 +315,7 @@ function matchesSearch(order: OrderRecord, query: string) {
     order.sourceLabel,
     order.sourceChannel,
     order.source,
+    orderKind(order),
     statusText(order),
     ...(order.items || []).flatMap((item) => [item.name, item.productName, item.itemName, item.serviceName]),
   ].map((value) => clean(value)).join(' ').toLowerCase();
@@ -288,7 +371,8 @@ export default function OrdersPage() {
   }, [fetchOrders]);
 
   const updateOrderStatus = async (order: OrderRecord, action: StatusAction) => {
-    const ok = window.confirm(`Mark this order as ${STATUS_ACTION_LABELS[action]}? This will update the order on behalf of the store.`);
+    const label = STATUS_ACTION_LABELS[action];
+    const ok = window.confirm(`Mark this ${kindLabel(orderKind(order)).toLowerCase()} as ${label}? This will update the order on behalf of the store.`);
     if (!ok) return;
 
     setUpdatingOrderId(`${order.id}-${action}`);
@@ -303,7 +387,7 @@ export default function OrdersPage() {
       let json: { ok?: boolean; error?: string; label?: string } | null = null;
       try { json = JSON.parse(raw); } catch {}
       if (!res.ok || !json?.ok) throw new Error(json?.error || raw || 'Unable to update order status.');
-      setStatusMessage(`Updated ${order.id} to ${json.label || STATUS_ACTION_LABELS[action]}.`);
+      setStatusMessage(`Updated ${order.id} to ${json.label || label}.`);
       await fetchOrders(true);
     } catch (e) {
       setStatusMessage(e instanceof Error ? e.message : 'Unable to update order status.');
@@ -321,6 +405,13 @@ export default function OrdersPage() {
     return initial;
   }, [orders]);
 
+  const kindStats = useMemo(() => {
+    return orders.reduce((acc, order) => {
+      acc[orderKind(order)] += 1;
+      return acc;
+    }, { product: 0, service: 0, manual: 0 } as Record<OrderKind, number>);
+  }, [orders]);
+
   const filtered = useMemo(() => {
     return orders.filter((order) => {
       const bucket = bucketFor(order);
@@ -332,11 +423,12 @@ export default function OrdersPage() {
   const revenue = useMemo(() => filtered.reduce((sum, order) => sum + amountNumber(order), 0), [filtered]);
 
   const downloadCsv = () => {
-    const headers = ['Order ID', 'Buyer', 'Phone', 'Customer Email', 'Store', 'Store ID', 'Amount', 'Bucket', 'Status', 'Age', 'Payment Updated At', 'Item Count', 'First Item', 'Source'];
+    const headers = ['Order ID', 'Kind', 'Buyer', 'Phone', 'Customer Email', 'Store', 'Store ID', 'Amount', 'Bucket', 'Status', 'Age', 'Payment Updated At', 'Item Count', 'First Item', 'Source'];
     const lines = filtered.map((order) => {
       const firstItem = (order.items || [])[0];
       return [
         order.id,
+        kindLabel(orderKind(order)),
         buyerName(order),
         buyerPhone(order),
         buyerEmail(order),
@@ -371,9 +463,9 @@ export default function OrdersPage() {
             <div className="inline-flex items-center gap-2 rounded-full border border-indigo-300/20 bg-indigo-400/10 px-3 py-1 text-xs font-semibold text-indigo-100">
               <Bell className="h-4 w-4" /> Live order monitoring
             </div>
-            <h2 className="mt-5 max-w-4xl text-3xl font-bold tracking-tight sm:text-4xl">Track every Sedifex Market order until delivery.</h2>
+            <h2 className="mt-5 max-w-4xl text-3xl font-bold tracking-tight sm:text-4xl">Manage Sedifex orders on behalf of stores.</h2>
             <p className="mt-4 max-w-3xl text-sm leading-7 text-slate-300">
-              Monitor paid orders, store acceptance, preparation, delivery progress, delayed orders, and problem cases. Admin can update status on behalf of stores.
+              Product orders, service bookings, and manual entries now show the right admin action buttons for their type.
             </p>
           </div>
           <button type="button" onClick={downloadCsv} className="inline-flex items-center justify-center gap-2 rounded-2xl bg-white px-4 py-3 text-sm font-bold text-slate-950 hover:bg-slate-100">
@@ -384,7 +476,7 @@ export default function OrdersPage() {
 
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"><p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Orders loaded</p><p className="mt-2 text-2xl font-bold text-slate-950">{orders.length}</p><p className="mt-1 text-xs text-emerald-600">From integrationOrders</p></div>
-        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"><p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Needs action</p><p className="mt-2 text-2xl font-bold text-slate-950">{stats.new + stats.accepted + stats.preparing + stats.out_for_delivery}</p><p className="mt-1 text-xs text-amber-600">Not delivered yet</p></div>
+        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"><p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Order types</p><p className="mt-2 text-sm font-bold text-slate-950">P: {kindStats.product} · S: {kindStats.service} · M: {kindStats.manual}</p><p className="mt-1 text-xs text-slate-500">Product / Service / Manual</p></div>
         <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"><p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Delayed</p><p className="mt-2 text-2xl font-bold text-slate-950">{stats.delayed}</p><p className="mt-1 text-xs text-rose-600">Requires follow-up</p></div>
         <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"><p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Shown value</p><p className="mt-2 text-2xl font-bold text-slate-950">GHS {revenue.toFixed(2)}</p><p className="mt-1 text-xs text-slate-500">Current filter total</p></div>
       </section>
@@ -410,7 +502,7 @@ export default function OrdersPage() {
 
         <div className="mt-5 flex items-center rounded-2xl border border-slate-200 px-3 focus-within:border-indigo-300 focus-within:ring-4 focus-within:ring-indigo-100">
           <Search className="h-4 w-4 text-slate-400" />
-          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search order ID, buyer, phone, store, item, status" className="w-full border-0 bg-transparent px-3 py-3 text-sm outline-none" />
+          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search order ID, buyer, phone, store, item, type, status" className="w-full border-0 bg-transparent px-3 py-3 text-sm outline-none" />
         </div>
 
         {loading ? <p className="mt-5 rounded-2xl bg-slate-50 p-4 text-sm text-slate-500">Loading orders…</p> : null}
@@ -427,7 +519,8 @@ export default function OrdersPage() {
                 const bucket = bucketFor(order);
                 const delayed = isDelayed(order);
                 const shownBucket: Bucket = delayed && bucket !== 'problem' && bucket !== 'delivered' ? 'delayed' : bucket;
-                const statusActions: StatusAction[] = bucket === 'delivered' ? ['received', 'preparing', 'out_for_delivery'] : ['received', 'preparing', 'out_for_delivery', 'delivered'];
+                const kind = orderKind(order);
+                const actionOptions = actionsForOrder(order);
                 return (
                   <div key={order.id} className="grid gap-4 px-4 py-4 text-sm xl:grid-cols-[1.05fr_0.95fr_0.75fr_0.9fr_0.95fr_0.8fr_1.05fr] xl:items-center">
                     <div className="min-w-0">
@@ -439,6 +532,7 @@ export default function OrdersPage() {
                       <p className="truncate font-semibold text-slate-950">{storeLabel(order)}</p>
                       <p className="break-all text-xs text-slate-500">{order.storeId || 'No store ID'}</p>
                       <p className="text-xs text-slate-400">{order.sourceLabel || order.sourceChannel || order.source || '—'}</p>
+                      <span className={`mt-2 inline-flex rounded-full px-2 py-0.5 text-[11px] font-bold ${kind === 'product' ? 'bg-blue-50 text-blue-700' : kind === 'service' ? 'bg-indigo-50 text-indigo-700' : 'bg-amber-50 text-amber-800'}`}>{kindLabel(kind)}</span>
                     </div>
                     <div>
                       <p className="font-bold text-slate-950">{money(order)}</p>
@@ -454,7 +548,7 @@ export default function OrdersPage() {
                         <div className="min-w-0">
                           {(order.items || []).slice(0, 2).map((item, index) => (
                             <p key={`${order.id}-item-${index}`} className="truncate text-xs text-slate-700">
-                              {item.item_type || item.type || 'item'} • {item.name || item.productName || item.itemName || item.serviceName || 'Item'} × {item.qty || item.quantity || 1}
+                              {itemKindText(item) || kind} • {item.name || item.productName || item.itemName || item.serviceName || 'Item'} × {item.qty || item.quantity || 1}
                             </p>
                           ))}
                           {(order.items || []).length === 0 ? <p className="text-xs text-slate-500">No item details</p> : null}
@@ -466,17 +560,18 @@ export default function OrdersPage() {
                       <p className="font-semibold text-slate-700">{ageLabel(order)}</p>
                       <p className="text-xs text-slate-500">{formatDate(order.paymentUpdatedAt || order.updatedAt || order.updateTime || order.createdAt || order.createTime)}</p>
                       {order.deliveredAt ? <p className="mt-1 text-xs text-emerald-600">Delivered: {formatDate(order.deliveredAt)}</p> : null}
+                      {order.completedAt ? <p className="mt-1 text-xs text-emerald-600">Completed: {formatDate(order.completedAt)}</p> : null}
                     </div>
                     <div className="flex flex-wrap gap-1.5">
-                      {statusActions.map((action) => (
+                      {actionOptions.map((action) => (
                         <button
-                          key={`${order.id}-${action}`}
+                          key={`${order.id}-${action.id}`}
                           type="button"
                           disabled={Boolean(updatingOrderId)}
-                          onClick={() => updateOrderStatus(order, action)}
-                          className={`rounded-full border px-2.5 py-1 text-[11px] font-bold transition disabled:cursor-not-allowed disabled:opacity-50 ${action === 'delivered' ? 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100' : action === 'out_for_delivery' ? 'border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100' : action === 'preparing' ? 'border-purple-200 bg-purple-50 text-purple-700 hover:bg-purple-100' : 'border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100'}`}
+                          onClick={() => updateOrderStatus(order, action.id)}
+                          className={`rounded-full border px-2.5 py-1 text-[11px] font-bold transition disabled:cursor-not-allowed disabled:opacity-50 ${actionToneClass(action.tone)}`}
                         >
-                          {updatingOrderId === `${order.id}-${action}` ? 'Updating…' : STATUS_ACTION_LABELS[action]}
+                          {updatingOrderId === `${order.id}-${action.id}` ? 'Updating…' : action.label}
                         </button>
                       ))}
                     </div>
