@@ -2,7 +2,15 @@ import { FieldValue, Timestamp } from 'firebase-admin/firestore';
 import { NextResponse } from 'next/server';
 import { adminFirestore } from '@/lib/firebase-admin';
 
-type StatusAction = 'received' | 'preparing' | 'out_for_delivery' | 'delivered';
+type StatusAction =
+  | 'received'
+  | 'preparing'
+  | 'out_for_delivery'
+  | 'delivered'
+  | 'confirm_service'
+  | 'service_in_progress'
+  | 'service_completed'
+  | 'complete_manual';
 
 type StatusBody = {
   orderId?: unknown;
@@ -12,10 +20,14 @@ type StatusBody = {
 };
 
 const ACTION_LABELS: Record<StatusAction, string> = {
-  received: 'Received / accepted by store',
-  preparing: 'Preparing',
+  received: 'Accepted by store',
+  preparing: 'Preparing product',
   out_for_delivery: 'Out for delivery',
   delivered: 'Delivered',
+  confirm_service: 'Service booking confirmed',
+  service_in_progress: 'Service started',
+  service_completed: 'Service completed',
+  complete_manual: 'Manual entry completed',
 };
 
 function cookieValue(req: Request, name: string) {
@@ -31,7 +43,14 @@ function clean(value: unknown, max = 500) {
 }
 
 function isStatusAction(value: string): value is StatusAction {
-  return value === 'received' || value === 'preparing' || value === 'out_for_delivery' || value === 'delivered';
+  return value === 'received'
+    || value === 'preparing'
+    || value === 'out_for_delivery'
+    || value === 'delivered'
+    || value === 'confirm_service'
+    || value === 'service_in_progress'
+    || value === 'service_completed'
+    || value === 'complete_manual';
 }
 
 function storeIdFromOrder(order: FirebaseFirestore.DocumentData | undefined, fallback = '') {
@@ -57,7 +76,9 @@ function statusPatch(action: StatusAction) {
       orderStatus: 'confirmed_by_store',
       order_status: 'confirmed_by_store',
       fulfillmentStatus: 'accepted',
+      fulfillment_status: 'accepted',
       deliveryStatus: 'not_started',
+      delivery_status: 'not_started',
       receivedAt: now,
       receivedBy: 'sedifex_admin',
       storeConfirmedAt: now,
@@ -71,7 +92,9 @@ function statusPatch(action: StatusAction) {
       orderStatus: 'preparing',
       order_status: 'preparing',
       fulfillmentStatus: 'preparing',
+      fulfillment_status: 'preparing',
       deliveryStatus: 'not_started',
+      delivery_status: 'not_started',
       preparingAt: now,
       preparingBy: 'sedifex_admin',
     };
@@ -83,22 +106,85 @@ function statusPatch(action: StatusAction) {
       orderStatus: 'out_for_delivery',
       order_status: 'out_for_delivery',
       fulfillmentStatus: 'out_for_delivery',
+      fulfillment_status: 'out_for_delivery',
       deliveryStatus: 'out_for_delivery',
+      delivery_status: 'out_for_delivery',
       outForDeliveryAt: now,
       outForDeliveryBy: 'sedifex_admin',
     };
   }
 
+  if (action === 'delivered') {
+    return {
+      ...base,
+      orderStatus: 'delivered',
+      order_status: 'delivered',
+      fulfillmentStatus: 'completed',
+      fulfillment_status: 'completed',
+      deliveryStatus: 'delivered',
+      delivery_status: 'delivered',
+      deliveredAt: now,
+      deliveredBy: 'sedifex_admin',
+      customerDeliveredEmailSent: false,
+      customerDeliveryConfirmationStatus: 'pending',
+    };
+  }
+
+  if (action === 'confirm_service') {
+    return {
+      ...base,
+      orderStatus: 'booking_confirmed',
+      order_status: 'booking_confirmed',
+      bookingStatus: 'confirmed',
+      fulfillmentStatus: 'booking_confirmed',
+      fulfillment_status: 'booking_confirmed',
+      deliveryStatus: 'not_applicable',
+      delivery_status: 'not_applicable',
+      serviceConfirmedAt: now,
+      serviceConfirmedBy: 'sedifex_admin',
+    };
+  }
+
+  if (action === 'service_in_progress') {
+    return {
+      ...base,
+      orderStatus: 'service_in_progress',
+      order_status: 'service_in_progress',
+      bookingStatus: 'in_progress',
+      fulfillmentStatus: 'service_in_progress',
+      fulfillment_status: 'service_in_progress',
+      deliveryStatus: 'not_applicable',
+      delivery_status: 'not_applicable',
+      serviceStartedAt: now,
+      serviceStartedBy: 'sedifex_admin',
+    };
+  }
+
+  if (action === 'service_completed') {
+    return {
+      ...base,
+      orderStatus: 'service_completed',
+      order_status: 'service_completed',
+      bookingStatus: 'completed',
+      fulfillmentStatus: 'completed',
+      fulfillment_status: 'completed',
+      deliveryStatus: 'not_applicable',
+      delivery_status: 'not_applicable',
+      completedAt: now,
+      completedBy: 'sedifex_admin',
+    };
+  }
+
   return {
     ...base,
-    orderStatus: 'delivered',
-    order_status: 'delivered',
+    orderStatus: 'manual_completed',
+    order_status: 'manual_completed',
     fulfillmentStatus: 'completed',
-    deliveryStatus: 'delivered',
-    deliveredAt: now,
-    deliveredBy: 'sedifex_admin',
-    customerDeliveredEmailSent: false,
-    customerDeliveryConfirmationStatus: 'pending',
+    fulfillment_status: 'completed',
+    deliveryStatus: 'not_applicable',
+    delivery_status: 'not_applicable',
+    completedAt: now,
+    completedBy: 'sedifex_admin',
   };
 }
 
