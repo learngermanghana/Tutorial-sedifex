@@ -2,11 +2,12 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { LayoutDashboard, Package, ShoppingBag, Store } from 'lucide-react';
+import { Activity, LayoutDashboard, Package, ShoppingBag, Store } from 'lucide-react';
 import { useAdminContext } from './admin-context';
 
 const items = [
   { href: '/admin', label: 'Dashboard', icon: LayoutDashboard, scopes: ['platform', 'store'] },
+  { href: '/admin/platform-activity', label: 'Platform Activity', icon: Activity, scopes: ['platform'] },
   { href: '/admin/stores', label: 'Stores', icon: Store, scopes: ['platform', 'store'] },
   { href: '/admin/products', label: 'Products', icon: Package, scopes: ['platform', 'store'] },
   { href: '/admin/orders', label: 'Orders', icon: ShoppingBag, scopes: ['platform', 'store'] },
