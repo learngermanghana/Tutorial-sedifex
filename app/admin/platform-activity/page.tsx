@@ -1,6 +1,7 @@
+import type { ComponentType } from 'react';
 import Link from 'next/link';
 import { Activity, Banknote, CreditCard, Database, Package, ReceiptText, Store, Users } from 'lucide-react';
-import { SectionCard, StatCard, StatusBadge } from '../../../components/admin/ui';
+import { SectionCard, StatusBadge } from '../../../components/admin/ui';
 import { getFirebaseEnvStatus, listFirestoreCollectionGroupDocuments, listFirestoreDocuments } from '../../../lib/firebase-admin';
 
 export const dynamic = 'force-dynamic';
@@ -42,6 +43,34 @@ type StoreSummary = {
   products: number;
   lastActivityAt: string | null;
 };
+
+type MetricCardProps = {
+  title: string;
+  value: string;
+  icon: ComponentType<{ className?: string }>;
+  tone: 'blue' | 'green' | 'yellow' | 'slate';
+};
+
+const metricTones: Record<MetricCardProps['tone'], string> = {
+  blue: 'bg-indigo-50 text-indigo-700 ring-indigo-200',
+  green: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
+  yellow: 'bg-amber-50 text-amber-700 ring-amber-200',
+  slate: 'bg-slate-100 text-slate-700 ring-slate-200',
+};
+
+function MetricCard({ title, value, icon: Icon, tone }: MetricCardProps) {
+  return (
+    <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-sm font-medium text-slate-500">{title}</p>
+        <span className={`inline-flex h-10 w-10 items-center justify-center rounded-xl ring-1 ring-inset ${metricTones[tone]}`}>
+          <Icon className="h-5 w-5" />
+        </span>
+      </div>
+      <p className="mt-3 text-2xl font-semibold text-slate-950">{value}</p>
+    </article>
+  );
+}
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
@@ -239,8 +268,11 @@ export default async function PlatformActivityPage() {
   if (!env.ready) {
     return (
       <main className="space-y-6">
-        <SectionCard title="Platform Activity" description="Firebase is not configured for this admin deployment.">
-          <StatusBadge tone="red">Firebase environment missing</StatusBadge>
+        <SectionCard title="Platform Activity">
+          <div className="space-y-3">
+            <p className="text-sm text-slate-600">Firebase is not configured for this admin deployment.</p>
+            <StatusBadge tone="red">Firebase environment missing</StatusBadge>
+          </div>
         </SectionCard>
       </main>
     );
@@ -329,28 +361,30 @@ export default async function PlatformActivityPage() {
       </div>
 
       {collectionErrors.length ? (
-        <SectionCard title="Some collections could not be read" description="The page is still showing the data it could load.">
+        <SectionCard title="Some collections could not be read">
           <div className="space-y-2 text-sm text-red-700">
+            <p className="text-slate-600">The page is still showing the data it could load.</p>
             {collectionErrors.map((error) => <p key={error}>{error}</p>)}
           </div>
         </SectionCard>
       ) : null}
 
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard title="Active stores" value={`${totals.activeStores}/${totals.stores}`} icon={Store} tone="blue" />
-        <StatCard title="Total activities" value={totals.activities.toLocaleString()} icon={Activity} tone="green" />
-        <StatCard title="All activity value" value={formatMoney(totals.activityValue)} icon={Database} tone="slate" />
-        <StatCard title="Settlement value" value={formatMoney(totals.settlementValue)} icon={CreditCard} tone="green" />
+        <MetricCard title="Active stores" value={`${totals.activeStores}/${totals.stores}`} icon={Store} tone="blue" />
+        <MetricCard title="Total activities" value={totals.activities.toLocaleString()} icon={Activity} tone="green" />
+        <MetricCard title="All activity value" value={formatMoney(totals.activityValue)} icon={Database} tone="slate" />
+        <MetricCard title="Settlement value" value={formatMoney(totals.settlementValue)} icon={CreditCard} tone="green" />
       </section>
 
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard title="Store-only cash/manual" value={formatMoney(totals.storeOnlyValue)} icon={Banknote} tone="yellow" />
-        <StatCard title="POS activity value" value={formatMoney(totals.posValue)} icon={ReceiptText} tone="blue" />
-        <StatCard title="Customers captured" value={totals.customers.toLocaleString()} icon={Users} tone="slate" />
-        <StatCard title="Products/services" value={totals.products.toLocaleString()} icon={Package} tone="slate" />
+        <MetricCard title="Store-only cash/manual" value={formatMoney(totals.storeOnlyValue)} icon={Banknote} tone="yellow" />
+        <MetricCard title="POS activity value" value={formatMoney(totals.posValue)} icon={ReceiptText} tone="blue" />
+        <MetricCard title="Customers captured" value={totals.customers.toLocaleString()} icon={Users} tone="slate" />
+        <MetricCard title="Products/services" value={totals.products.toLocaleString()} icon={Package} tone="slate" />
       </section>
 
-      <SectionCard title="Store usage summary" description="This is the admin view of which stores are active and what kind of value they are recording.">
+      <SectionCard title="Store usage summary">
+        <p className="mb-4 text-sm text-slate-600">This is the admin view of which stores are active and what kind of value they are recording.</p>
         <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-slate-200 text-sm">
             <thead className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
@@ -386,7 +420,8 @@ export default async function PlatformActivityPage() {
         </div>
       </SectionCard>
 
-      <SectionCard title="Recent platform activities" description="Detailed activity across POS, online orders, bookings, and store-only manual cash.">
+      <SectionCard title="Recent platform activities">
+        <p className="mb-4 text-sm text-slate-600">Detailed activity across POS, online orders, bookings, and store-only manual cash.</p>
         <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-slate-200 text-sm">
             <thead className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
