@@ -119,6 +119,7 @@ async function resetStoreAccess(formData: FormData) {
   const uid = text(formData.get('uid'));
   const email = text(formData.get('email')).toLowerCase();
   const password = text(formData.get('password'));
+  let successMessage = '';
 
   try {
     if (!storeId) throw new Error('Select a store before resetting access.');
@@ -173,10 +174,12 @@ async function resetStoreAccess(formData: FormData) {
     revalidatePath('/admin/store-access');
     revalidatePath('/admin/store-settings/manage');
 
-    resultRedirect('success', `Access updated for ${finalEmail || user.uid}.`);
+    successMessage = `Access updated for ${finalEmail || user.uid}.`;
   } catch (error) {
     resultRedirect('error', errorMessage(error));
   }
+
+  resultRedirect('success', successMessage);
 }
 
 function Alert({ status, message }: { status?: string; message?: string }) {
