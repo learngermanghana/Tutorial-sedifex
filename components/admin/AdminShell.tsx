@@ -24,6 +24,7 @@ const titleMap: Record<string, { title: string; description: string }> = {
   '/admin/live-chat': { title: 'Live Chat', description: 'Reply to Sedifex Market visitor messages and manage support conversations.' },
   '/admin/marketing': { title: 'Marketing Center', description: 'Filter contacts and send bulk campaigns.' },
   '/admin/adverts': { title: 'Advert Manager', description: 'Create, schedule, and manage Sedifex Market homepage flash adverts.' },
+  '/admin/store-access': { title: 'Store Access', description: 'Reset store Firebase Auth email and password while keeping UID metadata in sync.' },
   '/admin/store-settings/manage': { title: 'Advanced Store Settings', description: 'Edit technical store settings, integration API, auto-sync, and booking sync safely.' },
 };
 
