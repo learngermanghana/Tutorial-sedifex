@@ -5,6 +5,7 @@ import { useMemo, useState } from 'react';
 import { usePathname } from 'next/navigation';
 import { Menu } from 'lucide-react';
 import { AdminContextProvider } from './admin-context';
+import AskSedifexAgent from './AskSedifexAgent';
 import Sidebar from './Sidebar';
 import Header from './Header';
 import PageHeader from './PageHeader';
@@ -67,6 +68,7 @@ function ShellFrame({ children }: { children: ReactNode }) {
           </main>
         </div>
       </div>
+      <AskSedifexAgent />
     </div>
   );
 }
