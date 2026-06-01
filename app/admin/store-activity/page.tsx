@@ -17,6 +17,20 @@ type ModuleStat = {
   lastAt: number | null;
 };
 
+type ActivityEvent = {
+  id: string;
+  storeId: string;
+  moduleId: string;
+  moduleLabel: string;
+  action: string;
+  description: string;
+  recordId: string;
+  amount: number;
+  at: number | null;
+  href: string;
+  tone: 'green' | 'yellow' | 'red' | 'blue' | 'slate';
+};
+
 type StoreActivityRow = {
   id: string;
   name: string;
@@ -29,12 +43,14 @@ type StoreActivityRow = {
   revenue: number;
   modules: ModuleStat[];
   activeModules: string[];
+  recentEvents: ActivityEvent[];
 };
 
 type ActivityData = {
   ok: boolean;
   error: string | null;
   stores: StoreActivityRow[];
+  events: ActivityEvent[];
   collectionErrors: Record<string, string>;
 };
 
@@ -127,6 +143,21 @@ function recordTime(record: RecordDoc) {
     timestampToMillis(record.order_date) ??
     timestampToMillis(record.createTime)
   );
+}
+
+function createdTime(record: RecordDoc) {
+  return timestampToMillis(record.createdAt) ?? timestampToMillis(record.created_at) ?? timestampToMillis(record.createTime);
+}
+
+function updatedTime(record: RecordDoc) {
+  return timestampToMillis(record.updatedAt) ?? timestampToMillis(record.updated_at) ?? timestampToMillis(record.updateTime);
+}
+
+function looksUpdated(record: RecordDoc) {
+  const created = createdTime(record);
+  const updated = updatedTime(record);
+  if (!created || !updated) return Boolean(updated);
+  return updated - created > 60_000;
 }
 
 function later(current: number | null, next: number | null) {
@@ -244,8 +275,154 @@ function statusLabel(status: StoreActivityRow['status']) {
   return 'No activity';
 }
 
+function firstItem(record: RecordDoc) {
+  const items = Array.isArray(record.items) ? record.items : [];
+  const item = items[0];
+  return item && typeof item === 'object' && !Array.isArray(item) ? item as Record<string, unknown> : null;
+}
+
+function itemName(record: RecordDoc) {
+  const item = firstItem(record);
+  return fieldText(record, ['itemName', 'productName', 'serviceName', 'courseName', 'name', 'title'], '')
+    || valueText(item?.name ?? item?.productName ?? item?.itemName ?? item?.serviceName ?? item?.courseName, '')
+    || 'Item';
+}
+
+function buyerName(record: RecordDoc) {
+  const customer = asRecord(record.customer);
+  return fieldText(record, ['customerName', 'buyerName', 'name'], '') || valueText(customer?.name, '') || 'Customer';
+}
+
+function orderKind(record: RecordDoc) {
+  const item = firstItem(record);
+  const metadata = asRecord(record.metadata);
+  const combined = [
+    record.recordType,
+    record.orderType,
+    record.order_type,
+    record.itemType,
+    record.item_type,
+    record.fulfillmentType,
+    record.sourceLabel,
+    record.sourceChannel,
+    record.source,
+    metadata?.recordType,
+    metadata?.orderType,
+    metadata?.quickPayType,
+    metadata?.accountingType,
+    item?.type,
+    item?.itemType,
+    item?.item_type,
+    item?.serviceName,
+  ].map((value) => valueText(value).toLowerCase()).join(' ');
+
+  if (/booking|appointment/.test(combined)) return 'booking';
+  if (/service|course|student_registration|donation/.test(combined)) return 'service';
+  if (/cash|manual/.test(combined)) return 'manual';
+  return 'product';
+}
+
+function actionHref(moduleId: string, storeId: string, recordId: string) {
+  if (moduleId === 'storeProfiles' || moduleId === 'storeSettings') return `/admin/stores/${encodeURIComponent(storeId)}`;
+  if (moduleId === 'orders' || moduleId === 'bookings') return '/admin/orders';
+  if (moduleId === 'customers') return '/admin/customers';
+  if (moduleId === 'webhookDeliveries') return '/admin/deliveries';
+  if (moduleId === 'publicListings' || moduleId === 'publicProducts' || moduleId === 'products' || moduleId === 'services' || moduleId === 'courses' || moduleId === 'catalogItems') return '/admin/products';
+  return `/admin/stores/${encodeURIComponent(storeId)}?record=${encodeURIComponent(recordId)}`;
+}
+
+function activityForRecord(record: RecordDoc, moduleId: string, moduleLabel: string, storeId: string): ActivityEvent {
+  const recordId = valueText(record.id, valueText(record.path, 'record'));
+  const at = recordTime(record);
+  const amount = shouldCountRevenue(record) ? amountFromRecord(record) : 0;
+  const status = orderStatus(record);
+  let action = moduleLabel;
+  let description = `${moduleLabel} record changed.`;
+  let tone: ActivityEvent['tone'] = 'slate';
+
+  if (moduleId === 'orders') {
+    const kind = orderKind(record);
+    const item = itemName(record);
+    const buyer = buyerName(record);
+    const quickPay = /quick.?pay|sedifex quick pay/.test([record.sourceLabel, record.sourceChannel, record.source].map(valueText).join(' ').toLowerCase());
+    tone = amount > 0 ? 'green' : 'blue';
+    if (/delivered|completed/.test(status)) {
+      action = kind === 'product' ? 'Delivered product order' : kind === 'booking' ? 'Completed booking' : 'Completed service payment';
+    } else if (/paid|success|successful|confirmed|paid_cash/.test(status)) {
+      action = kind === 'product' ? 'Received product order' : kind === 'booking' ? 'Received booking payment' : 'Received service payment';
+    } else if (/failed|cancelled|canceled|declined/.test(status)) {
+      action = 'Order needs attention';
+      tone = 'red';
+    } else {
+      action = kind === 'product' ? 'Created product order' : kind === 'booking' ? 'Created booking order' : 'Created service order';
+    }
+    description = `${buyer} ${quickPay ? 'used Quick Pay for' : 'ordered'} ${item}${amount > 0 ? ` · ${formatMoney(amount)}` : ''}.`;
+  } else if (moduleId === 'bookings') {
+    tone = /completed|delivered/.test(status) ? 'green' : 'blue';
+    action = /completed|delivered/.test(status) ? 'Completed website booking' : /confirmed|paid|success/.test(status) ? 'Confirmed website booking' : 'Created website booking';
+    description = `${buyerName(record)} booked ${itemName(record)}${amount > 0 ? ` · ${formatMoney(amount)}` : ''}.`;
+  } else if (moduleId === 'customers') {
+    tone = 'blue';
+    action = looksUpdated(record) ? 'Updated customer' : 'Added customer';
+    description = `${fieldText(record, ['name', 'customerName', 'fullName', 'displayName'], 'Customer')} was saved to the customer list.`;
+  } else if (moduleId === 'products' || moduleId === 'publicProducts') {
+    tone = 'slate';
+    action = looksUpdated(record) ? 'Updated product' : 'Added product';
+    description = `${itemName(record)} is in the product/catalog records.`;
+  } else if (moduleId === 'services') {
+    tone = 'slate';
+    action = looksUpdated(record) ? 'Updated service' : 'Added service';
+    description = `${itemName(record)} is in the service catalog.`;
+  } else if (moduleId === 'courses') {
+    tone = 'slate';
+    action = looksUpdated(record) ? 'Updated course' : 'Added course';
+    description = `${itemName(record)} is in the course catalog.`;
+  } else if (moduleId === 'publicListings' || moduleId === 'catalogItems') {
+    tone = 'blue';
+    action = looksUpdated(record) ? 'Updated marketplace listing' : 'Published marketplace listing';
+    description = `${itemName(record)} appeared in public catalog records.`;
+  } else if (moduleId === 'storeSettings') {
+    tone = 'yellow';
+    action = 'Updated store settings';
+    const googleShopping = nestedValue(record, ['googleShopping', 'connection', 'connected']) === true ? ' Google Shopping is connected.' : '';
+    const autoSync = nestedValue(record, ['googleShopping', 'catalogSync', 'autoSyncEnabled']) === true ? ' Auto sync is on.' : '';
+    description = `Store settings were changed.${googleShopping}${autoSync}`;
+  } else if (moduleId === 'storeProfiles') {
+    tone = 'yellow';
+    action = looksUpdated(record) ? 'Updated store profile' : 'Created store profile';
+    description = `${storeName(record, storeId)} profile is available in Sedifex.`;
+  } else if (moduleId === 'webhookDeliveries') {
+    const deliveryStatus = fieldText(record, ['status', 'result', 'deliveryStatus'], '').toLowerCase();
+    tone = /fail|error|retry/.test(deliveryStatus) ? 'red' : 'green';
+    action = /fail|error|retry/.test(deliveryStatus) ? 'Webhook failed/retried' : 'Webhook delivered';
+    description = `${fieldText(record, ['eventType', 'event', 'topic', 'type'], 'Webhook event')} ${deliveryStatus || 'was processed'}.`;
+  }
+
+  return {
+    id: `${moduleId}-${storeId}-${recordId}`,
+    storeId,
+    moduleId,
+    moduleLabel,
+    action,
+    description,
+    recordId,
+    amount,
+    at,
+    href: actionHref(moduleId, storeId, recordId),
+    tone,
+  };
+}
+
 function searchableText(row: StoreActivityRow) {
-  return [row.name, row.id, row.contact, row.phone, row.location, row.activeModules.join(' ')].join(' ').toLowerCase();
+  return [
+    row.name,
+    row.id,
+    row.contact,
+    row.phone,
+    row.location,
+    row.activeModules.join(' '),
+    row.recentEvents.map((event) => `${event.action} ${event.description}`).join(' '),
+  ].join(' ').toLowerCase();
 }
 
 async function safeRead(collection: string, limit = 500) {
@@ -268,13 +445,14 @@ function ensureModule(map: Map<string, ModuleStat>, id: string, label: string) {
 async function loadActivityData(): Promise<ActivityData> {
   const env = getFirebaseEnvStatus();
   if (!env.ready) {
-    return { ok: false, error: 'Firebase environment variables are not ready in this deployment.', stores: [], collectionErrors: {} };
+    return { ok: false, error: 'Firebase environment variables are not ready in this deployment.', stores: [], events: [], collectionErrors: {} };
   }
 
   const results = await Promise.all(ACTIVITY_COLLECTIONS.map((item) => safeRead(item.collection, 600)));
   const collectionErrors: Record<string, string> = {};
   const storeProfiles = new Map<string, RecordDoc>();
   const storeModules = new Map<string, Map<string, ModuleStat>>();
+  const storeEvents = new Map<string, ActivityEvent[]>();
 
   ACTIVITY_COLLECTIONS.forEach((collectionConfig, index) => {
     const result = results[index];
@@ -302,14 +480,19 @@ async function loadActivityData(): Promise<ActivityData> {
         module.amount += amountFromRecord(record);
       }
       storeModules.set(storeId, modules);
+
+      const events = storeEvents.get(storeId) || [];
+      events.push(activityForRecord(record, collectionConfig.id, collectionConfig.label, storeId));
+      storeEvents.set(storeId, events);
     });
   });
 
-  const allStoreIds = new Set([...storeProfiles.keys(), ...storeModules.keys()]);
+  const allStoreIds = new Set([...storeProfiles.keys(), ...storeModules.keys(), ...storeEvents.keys()]);
   const stores = [...allStoreIds].map((storeId) => {
     const profile = storeProfiles.get(storeId) || { id: storeId };
     const modules = [...(storeModules.get(storeId)?.values() || [])].filter((module) => module.count > 0).sort((a, b) => b.count - a.count);
-    const lastAt = modules.map((module) => module.lastAt).reduce(later, recordTime(profile));
+    const recentEvents = [...(storeEvents.get(storeId) || [])].sort((a, b) => (b.at || 0) - (a.at || 0));
+    const lastAt = recentEvents.map((event) => event.at).reduce(later, modules.map((module) => module.lastAt).reduce(later, recordTime(profile)));
     const totalRecords = modules.reduce((sum, module) => sum + module.count, 0);
     const revenue = modules.reduce((sum, module) => sum + module.amount, 0);
 
@@ -325,13 +508,17 @@ async function loadActivityData(): Promise<ActivityData> {
       revenue,
       modules,
       activeModules: modules.map((module) => module.label),
+      recentEvents,
     } satisfies StoreActivityRow;
   }).sort((a, b) => (b.lastAt || 0) - (a.lastAt || 0));
+
+  const events = stores.flatMap((store) => store.recentEvents.map((event) => ({ ...event, description: `${store.name}: ${event.description}` }))).sort((a, b) => (b.at || 0) - (a.at || 0));
 
   return {
     ok: true,
     error: null,
     stores,
+    events,
     collectionErrors,
   };
 }
@@ -353,9 +540,9 @@ export default async function StoreActivityPage({ searchParams }: { searchParams
     <div className="space-y-6">
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard label="Stores tracked" value={data.ok ? String(data.stores.length) : 'Setup'} delta={data.ok ? `${activeStores} active or warm` : 'Database not ready'} />
-        <StatCard label="Tracked records" value={data.ok ? String(totalRecords) : '—'} delta="Orders, catalog, customers, setup" />
+        <StatCard label="Actions found" value={data.ok ? String(data.events.length) : '—'} delta="What stores did" />
         <StatCard label="Tracked revenue" value={data.ok ? formatMoney(totalRevenue) : '—'} delta="Paid/readable order records" />
-        <StatCard label="Module types" value={data.ok ? String(topModules.length) : '—'} delta="Collections with activity" />
+        <StatCard label="Tracked records" value={data.ok ? String(totalRecords) : '—'} delta="Orders, catalog, customers, setup" />
       </section>
 
       {data.error ? (
@@ -372,7 +559,7 @@ export default async function StoreActivityPage({ searchParams }: { searchParams
 
       <section className="grid gap-6 xl:grid-cols-[1.8fr_0.8fr]">
         <SectionCard
-          title="Who is using what"
+          title="What stores did"
           action={<Link href="/admin/orders" className="inline-flex items-center gap-1 text-xs font-semibold text-indigo-600 hover:text-indigo-500">Open orders <ArrowUpRight className="h-3.5 w-3.5" /></Link>}
         >
           <form className="mb-4 flex flex-col gap-3 sm:flex-row" action="/admin/store-activity">
@@ -381,7 +568,7 @@ export default async function StoreActivityPage({ searchParams }: { searchParams
               <input
                 name="q"
                 defaultValue={params.q || ''}
-                placeholder="Search by store, email, phone, location, or module"
+                placeholder="Search store, phone, module, or action like product, Quick Pay, customer, service"
                 className="w-full rounded-2xl border border-slate-200 bg-white py-3 pl-11 pr-4 text-sm text-slate-900 outline-none transition focus:border-indigo-300 focus:ring-4 focus:ring-indigo-100"
               />
             </label>
@@ -389,14 +576,14 @@ export default async function StoreActivityPage({ searchParams }: { searchParams
           </form>
 
           <div className="overflow-hidden rounded-2xl border border-slate-200">
-            <div className="grid grid-cols-[1.3fr_0.65fr_0.9fr_1.1fr_0.65fr_0.7fr] bg-slate-50 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500 max-xl:hidden">
-              <span>Store</span><span>Status</span><span>Last activity</span><span>Modules used</span><span>Records</span><span>Revenue</span>
+            <div className="grid grid-cols-[1.15fr_0.55fr_0.85fr_1.35fr_0.55fr] bg-slate-50 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500 max-xl:hidden">
+              <span>Store</span><span>Status</span><span>Last used</span><span>Recent actions</span><span>Revenue</span>
             </div>
             <div className="divide-y divide-slate-200">
               {stores.length === 0 ? (
                 <div className="p-8 text-center text-sm text-slate-500">No store activity matches this search.</div>
               ) : stores.map((store) => (
-                <div key={store.id} className="grid gap-3 px-4 py-4 text-sm transition hover:bg-indigo-50/60 xl:grid-cols-[1.3fr_0.65fr_0.9fr_1.1fr_0.65fr_0.7fr] xl:items-center">
+                <div key={store.id} className="grid gap-3 px-4 py-4 text-sm transition hover:bg-indigo-50/60 xl:grid-cols-[1.15fr_0.55fr_0.85fr_1.35fr_0.55fr] xl:items-start">
                   <Link href={`/admin/stores/${encodeURIComponent(store.id)}`} className="flex min-w-0 items-center gap-3">
                     <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-indigo-50 text-indigo-600"><Store className="h-4 w-4" /></span>
                     <div className="min-w-0">
@@ -409,15 +596,22 @@ export default async function StoreActivityPage({ searchParams }: { searchParams
                   <div className="text-slate-600">
                     <p className="font-medium text-slate-900">{ageLabel(store.lastAt)}</p>
                     <p className="text-xs text-slate-500">{formatDate(store.lastAt)}</p>
+                    <p className="mt-1 text-xs text-slate-400">{store.totalRecords} records</p>
                   </div>
-                  <div className="flex flex-wrap gap-1.5">
-                    {store.modules.length === 0 ? <span className="text-xs text-slate-400">No module usage yet</span> : null}
-                    {store.modules.slice(0, 6).map((module) => (
-                      <span key={module.id} className="rounded-full bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700 ring-1 ring-inset ring-slate-200">{module.label}: {module.count}</span>
+                  <div className="space-y-2">
+                    {store.recentEvents.length === 0 ? <span className="text-xs text-slate-400">No action history yet</span> : null}
+                    {store.recentEvents.slice(0, 4).map((event) => (
+                      <Link key={event.id} href={event.href} className="block rounded-2xl bg-slate-50 p-3 transition hover:bg-slate-100">
+                        <div className="flex items-start justify-between gap-2">
+                          <p className="font-semibold text-slate-900">{event.action}</p>
+                          <StatusBadge tone={event.tone}>{ageLabel(event.at)}</StatusBadge>
+                        </div>
+                        <p className="mt-1 text-xs leading-5 text-slate-600">{event.description}</p>
+                        <p className="mt-1 text-[11px] text-slate-400">{event.moduleLabel} · {event.recordId}</p>
+                      </Link>
                     ))}
-                    {store.modules.length > 6 ? <span className="text-xs text-slate-500">+{store.modules.length - 6} more</span> : null}
+                    {store.recentEvents.length > 4 ? <p className="text-xs text-slate-500">+{store.recentEvents.length - 4} more actions found</p> : null}
                   </div>
-                  <div className="font-semibold text-slate-950">{store.totalRecords}</div>
                   <div className="font-semibold text-slate-950">{formatMoney(store.revenue)}</div>
                 </div>
               ))}
@@ -426,6 +620,24 @@ export default async function StoreActivityPage({ searchParams }: { searchParams
         </SectionCard>
 
         <div className="space-y-6">
+          <SectionCard title="Recent actions across stores">
+            <div className="space-y-3">
+              {data.events.length === 0 ? <p className="text-sm text-slate-500">No action history detected yet.</p> : null}
+              {data.events.slice(0, 12).map((event) => (
+                <Link key={event.id} href={event.href} className="block rounded-2xl bg-slate-50 p-4 text-sm transition hover:bg-slate-100">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="font-semibold text-slate-950">{event.action}</p>
+                      <p className="mt-1 text-xs leading-5 text-slate-600">{event.description}</p>
+                    </div>
+                    <StatusBadge tone={event.tone}>{ageLabel(event.at)}</StatusBadge>
+                  </div>
+                  <p className="mt-2 flex items-center gap-1 text-[11px] text-slate-400"><Clock3 className="h-3 w-3" /> {formatDate(event.at)}</p>
+                </Link>
+              ))}
+            </div>
+          </SectionCard>
+
           <SectionCard title="Most used modules">
             <div className="space-y-3">
               {topModules.length === 0 ? <p className="text-sm text-slate-500">No module activity detected yet.</p> : null}
@@ -438,12 +650,12 @@ export default async function StoreActivityPage({ searchParams }: { searchParams
             </div>
           </SectionCard>
 
-          <SectionCard title="What this page tracks">
+          <SectionCard title="What this page now shows">
             <div className="grid gap-3 text-sm text-slate-600">
-              <div className="flex gap-3 rounded-2xl bg-slate-50 p-4"><Store className="h-5 w-5 text-indigo-500" /><span>Store profiles and store settings.</span></div>
-              <div className="flex gap-3 rounded-2xl bg-slate-50 p-4"><ShoppingBag className="h-5 w-5 text-indigo-500" /><span>Online orders, Quick Pay, booking payments, and revenue signals.</span></div>
-              <div className="flex gap-3 rounded-2xl bg-slate-50 p-4"><Package className="h-5 w-5 text-indigo-500" /><span>Products, services, courses, public listings, and catalog items.</span></div>
-              <div className="flex gap-3 rounded-2xl bg-slate-50 p-4"><Users className="h-5 w-5 text-indigo-500" /><span>Customer and webhook delivery activity when those collections exist.</span></div>
+              <div className="flex gap-3 rounded-2xl bg-slate-50 p-4"><Store className="h-5 w-5 text-indigo-500" /><span>Store profile/settings actions, including setup changes.</span></div>
+              <div className="flex gap-3 rounded-2xl bg-slate-50 p-4"><ShoppingBag className="h-5 w-5 text-indigo-500" /><span>Quick Pay, online orders, booking payments, completed orders, and revenue signals.</span></div>
+              <div className="flex gap-3 rounded-2xl bg-slate-50 p-4"><Package className="h-5 w-5 text-indigo-500" /><span>Products, services, courses, public listings, and catalog changes.</span></div>
+              <div className="flex gap-3 rounded-2xl bg-slate-50 p-4"><Users className="h-5 w-5 text-indigo-500" /><span>Customer saves and webhook delivery activity when those collections exist.</span></div>
             </div>
           </SectionCard>
 
@@ -460,7 +672,7 @@ export default async function StoreActivityPage({ searchParams }: { searchParams
           <SectionCard title="Next improvement">
             <div className="flex gap-3 rounded-2xl bg-indigo-50 p-4 text-sm text-indigo-900">
               <Activity className="h-5 w-5 shrink-0" />
-              <p>For exact click-by-click analytics, add a small event logger to the store dashboard later. This page already shows activity from existing business records.</p>
+              <p>This page now reconstructs actions from existing business records. For exact clicks like “opened report” or “visited dashboard,” add a small event logger inside the store app.</p>
             </div>
           </SectionCard>
         </div>
