@@ -12,6 +12,7 @@ import PageHeader from './PageHeader';
 const titleMap: Record<string, { title: string; description: string }> = {
   '/admin': { title: 'Overview', description: 'Monitor the health and performance of your Sedifex platform.' },
   '/admin/stores': { title: 'Stores', description: 'Manage tenant stores, plans, status, and storefront operations.' },
+  '/admin/store-activity': { title: 'Store Activity', description: 'Track which stores are using Sedifex modules, recent activity, and revenue signals.' },
   '/admin/customers': { title: 'Customers', description: 'See customer records across stores, with contact details, store links, and order history.' },
   '/admin/products': { title: 'Catalog Review', description: 'Inspect Sedifex product, service, and course readiness.' },
   '/admin/poster-generator': { title: 'Poster Generator', description: 'Create branded Sedifex Market product posters with QR codes in one click.' },
