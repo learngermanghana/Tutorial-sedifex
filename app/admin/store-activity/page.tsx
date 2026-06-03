@@ -67,6 +67,7 @@ const ACTIVITY_COLLECTIONS = [
   { id: 'courses', label: 'Courses', collection: 'courses', amount: false },
   { id: 'catalogItems', label: 'Catalog items', collection: 'catalogItems', amount: false },
   { id: 'webhookDeliveries', label: 'Webhook deliveries', collection: 'webhookDeliveries', amount: false },
+  { id: 'analyticsEvents', label: 'Client actions', collection: 'analyticsEvents', amount: false },
 ] as const;
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -131,6 +132,7 @@ function timestampToMillis(value: unknown): number | null {
 function recordTime(record: RecordDoc) {
   return (
     timestampToMillis(record.lastActivityAt) ??
+    timestampToMillis(record.createdAtIso) ??
     timestampToMillis(record.paymentUpdatedAt) ??
     timestampToMillis(record.deliveredAt) ??
     timestampToMillis(record.completedAt) ??
@@ -167,7 +169,7 @@ function later(current: number | null, next: number | null) {
 }
 
 function storeIdFromRecord(record: RecordDoc, collectionId: string) {
-  const direct = fieldText(record, ['storeId', 'store_id', 'merchantId', 'merchant_id', 'businessId', 'business_id', 'workspaceId', 'workspace_id'], '');
+  const direct = fieldText(record, ['storeId', 'store_id', 'merchantId', 'merchant_id', 'businessId', 'business_id', 'workspaceId', 'workspace_id', 'storeSlug', 'sellerId'], '');
   if (direct) return direct;
 
   const metadata = asRecord(record.metadata);
@@ -293,6 +295,44 @@ function buyerName(record: RecordDoc) {
   return fieldText(record, ['customerName', 'buyerName', 'name'], '') || valueText(customer?.name, '') || 'Customer';
 }
 
+function readableEventName(value: string) {
+  return value
+    .split(/[_.-]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ') || 'Client action';
+}
+
+function compactDetail(label: string, value: string) {
+  return value ? `${label}: ${value}` : '';
+}
+
+function analyticsAction(record: RecordDoc) {
+  const eventName = fieldText(record, ['eventName', 'event', 'name', 'type'], 'client_action').toLowerCase();
+  const product = fieldText(record, ['productName', 'productTitle', 'itemName', 'actionTarget'], '');
+  const store = fieldText(record, ['storeName', 'merchantName', 'businessName'], '');
+  const searchTerm = fieldText(record, ['searchTerm', 'query', 'q'], '');
+  const page = fieldText(record, ['pagePath', 'pageUrl', 'path', 'url'], '');
+  const device = fieldText(record, ['device', 'deviceType'], '');
+  const source = fieldText(record, ['trafficSource', 'source', 'referrer'], '');
+  const session = fieldText(record, ['sessionId', 'visitorId', 'userId'], '');
+  const context = [compactDetail('page', page), compactDetail('device', device), compactDetail('source', source), compactDetail('session', session)].filter(Boolean).join(' · ');
+
+  if (eventName === 'product_view') return { action: 'Viewed product', description: `Client viewed ${product || 'a product'}${store ? ` from ${store}` : ''}.${context ? ` ${context}.` : ''}`, tone: 'blue' as ActivityEvent['tone'] };
+  if (eventName === 'store_view') return { action: 'Viewed store', description: `Client opened ${store || 'the store page'}.${context ? ` ${context}.` : ''}`, tone: 'blue' as ActivityEvent['tone'] };
+  if (eventName === 'page_view') return { action: 'Viewed page', description: `Client visited ${page || 'a page'}${store ? ` for ${store}` : ''}.${context ? ` ${context}.` : ''}`, tone: 'slate' as ActivityEvent['tone'] };
+  if (eventName === 'search') return { action: 'Searched marketplace', description: `Client searched for “${searchTerm || 'unknown term'}”.${context ? ` ${context}.` : ''}`, tone: 'yellow' as ActivityEvent['tone'] };
+  if (eventName === 'add_to_cart') return { action: 'Added to cart', description: `Client added ${product || 'an item'} to cart.${context ? ` ${context}.` : ''}`, tone: 'green' as ActivityEvent['tone'] };
+  if (eventName === 'checkout_started') return { action: 'Started checkout', description: `Client started checkout${product ? ` for ${product}` : ''}.${context ? ` ${context}.` : ''}`, tone: 'green' as ActivityEvent['tone'] };
+  if (eventName === 'payment_initialized') return { action: 'Started payment', description: `Client opened payment${product ? ` for ${product}` : ''}.${context ? ` ${context}.` : ''}`, tone: 'green' as ActivityEvent['tone'] };
+  if (eventName === 'order_paid') return { action: 'Completed payment', description: `Client paid for ${product || 'an order'}.${context ? ` ${context}.` : ''}`, tone: 'green' as ActivityEvent['tone'] };
+  if (eventName === 'whatsapp_click') return { action: 'Clicked WhatsApp', description: `Client tapped WhatsApp${product ? ` about ${product}` : ''}.${context ? ` ${context}.` : ''}`, tone: 'green' as ActivityEvent['tone'] };
+  if (eventName === 'phone_click') return { action: 'Clicked phone number', description: `Client tapped the store phone number.${context ? ` ${context}.` : ''}`, tone: 'green' as ActivityEvent['tone'] };
+  if (eventName === 'seller_profile_click') return { action: 'Opened seller profile', description: `Client opened ${store || 'the seller'} profile.${context ? ` ${context}.` : ''}`, tone: 'blue' as ActivityEvent['tone'] };
+
+  return { action: readableEventName(eventName), description: `Client event recorded${page ? ` on ${page}` : ''}.${context ? ` ${context}.` : ''}`, tone: 'slate' as ActivityEvent['tone'] };
+}
+
 function orderKind(record: RecordDoc) {
   const item = firstItem(record);
   const metadata = asRecord(record.metadata);
@@ -327,6 +367,7 @@ function actionHref(moduleId: string, storeId: string, recordId: string) {
   if (moduleId === 'orders' || moduleId === 'bookings') return '/admin/orders';
   if (moduleId === 'customers') return '/admin/customers';
   if (moduleId === 'webhookDeliveries') return '/admin/deliveries';
+  if (moduleId === 'analyticsEvents') return '/admin/analytics';
   if (moduleId === 'publicListings' || moduleId === 'publicProducts' || moduleId === 'products' || moduleId === 'services' || moduleId === 'courses' || moduleId === 'catalogItems') return '/admin/products';
   return `/admin/stores/${encodeURIComponent(storeId)}?record=${encodeURIComponent(recordId)}`;
 }
@@ -396,6 +437,11 @@ function activityForRecord(record: RecordDoc, moduleId: string, moduleLabel: str
     tone = /fail|error|retry/.test(deliveryStatus) ? 'red' : 'green';
     action = /fail|error|retry/.test(deliveryStatus) ? 'Webhook failed/retried' : 'Webhook delivered';
     description = `${fieldText(record, ['eventType', 'event', 'topic', 'type'], 'Webhook event')} ${deliveryStatus || 'was processed'}.`;
+  } else if (moduleId === 'analyticsEvents') {
+    const analytics = analyticsAction(record);
+    action = analytics.action;
+    description = analytics.description;
+    tone = analytics.tone;
   }
 
   return {
@@ -540,9 +586,9 @@ export default async function StoreActivityPage({ searchParams }: { searchParams
     <div className="space-y-6">
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard label="Stores tracked" value={data.ok ? String(data.stores.length) : 'Setup'} delta={data.ok ? `${activeStores} active or warm` : 'Database not ready'} />
-        <StatCard label="Actions found" value={data.ok ? String(data.events.length) : '—'} delta="What stores did" />
+        <StatCard label="Actions found" value={data.ok ? String(data.events.length) : '—'} delta="Exact clicks + records" />
         <StatCard label="Tracked revenue" value={data.ok ? formatMoney(totalRevenue) : '—'} delta="Paid/readable order records" />
-        <StatCard label="Tracked records" value={data.ok ? String(totalRecords) : '—'} delta="Orders, catalog, customers, setup" />
+        <StatCard label="Tracked records" value={data.ok ? String(totalRecords) : '—'} delta="Clicks, orders, catalog, setup" />
       </section>
 
       {data.error ? (
@@ -559,7 +605,7 @@ export default async function StoreActivityPage({ searchParams }: { searchParams
 
       <section className="grid gap-6 xl:grid-cols-[1.8fr_0.8fr]">
         <SectionCard
-          title="What stores did"
+          title="What each client did"
           action={<Link href="/admin/orders" className="inline-flex items-center gap-1 text-xs font-semibold text-indigo-600 hover:text-indigo-500">Open orders <ArrowUpRight className="h-3.5 w-3.5" /></Link>}
         >
           <form className="mb-4 flex flex-col gap-3 sm:flex-row" action="/admin/store-activity">
@@ -568,7 +614,7 @@ export default async function StoreActivityPage({ searchParams }: { searchParams
               <input
                 name="q"
                 defaultValue={params.q || ''}
-                placeholder="Search store, phone, module, or action like product, Quick Pay, customer, service"
+                placeholder="Search store, phone, exact action, product, page, session, Quick Pay, WhatsApp"
                 className="w-full rounded-2xl border border-slate-200 bg-white py-3 pl-11 pr-4 text-sm text-slate-900 outline-none transition focus:border-indigo-300 focus:ring-4 focus:ring-indigo-100"
               />
             </label>
@@ -577,7 +623,7 @@ export default async function StoreActivityPage({ searchParams }: { searchParams
 
           <div className="overflow-hidden rounded-2xl border border-slate-200">
             <div className="grid grid-cols-[1.15fr_0.55fr_0.85fr_1.35fr_0.55fr] bg-slate-50 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500 max-xl:hidden">
-              <span>Store</span><span>Status</span><span>Last used</span><span>Recent actions</span><span>Revenue</span>
+              <span>Store</span><span>Status</span><span>Last seen</span><span>Exact recent client actions</span><span>Revenue</span>
             </div>
             <div className="divide-y divide-slate-200">
               {stores.length === 0 ? (
@@ -610,7 +656,7 @@ export default async function StoreActivityPage({ searchParams }: { searchParams
                         <p className="mt-1 text-[11px] text-slate-400">{event.moduleLabel} · {event.recordId}</p>
                       </Link>
                     ))}
-                    {store.recentEvents.length > 4 ? <p className="text-xs text-slate-500">+{store.recentEvents.length - 4} more actions found</p> : null}
+                    {store.recentEvents.length > 4 ? <p className="text-xs text-slate-500">+{store.recentEvents.length - 4} more actions found — search this store or open Analytics for the full trail</p> : null}
                   </div>
                   <div className="font-semibold text-slate-950">{formatMoney(store.revenue)}</div>
                 </div>
@@ -620,7 +666,7 @@ export default async function StoreActivityPage({ searchParams }: { searchParams
         </SectionCard>
 
         <div className="space-y-6">
-          <SectionCard title="Recent actions across stores">
+          <SectionCard title="Exact latest actions">
             <div className="space-y-3">
               {data.events.length === 0 ? <p className="text-sm text-slate-500">No action history detected yet.</p> : null}
               {data.events.slice(0, 12).map((event) => (
@@ -652,6 +698,7 @@ export default async function StoreActivityPage({ searchParams }: { searchParams
 
           <SectionCard title="What this page now shows">
             <div className="grid gap-3 text-sm text-slate-600">
+              <div className="flex gap-3 rounded-2xl bg-slate-50 p-4"><Activity className="h-5 w-5 text-indigo-500" /><span>Client clickstream events from analyticsEvents: page/product/store views, searches, WhatsApp/phone taps, add-to-cart, checkout, and payment starts.</span></div>
               <div className="flex gap-3 rounded-2xl bg-slate-50 p-4"><Store className="h-5 w-5 text-indigo-500" /><span>Store profile/settings actions, including setup changes.</span></div>
               <div className="flex gap-3 rounded-2xl bg-slate-50 p-4"><ShoppingBag className="h-5 w-5 text-indigo-500" /><span>Quick Pay, online orders, booking payments, completed orders, and revenue signals.</span></div>
               <div className="flex gap-3 rounded-2xl bg-slate-50 p-4"><Package className="h-5 w-5 text-indigo-500" /><span>Products, services, courses, public listings, and catalog changes.</span></div>
@@ -672,7 +719,7 @@ export default async function StoreActivityPage({ searchParams }: { searchParams
           <SectionCard title="Next improvement">
             <div className="flex gap-3 rounded-2xl bg-indigo-50 p-4 text-sm text-indigo-900">
               <Activity className="h-5 w-5 shrink-0" />
-              <p>This page now reconstructs actions from existing business records. For exact clicks like “opened report” or “visited dashboard,” add a small event logger inside the store app.</p>
+              <p>This page now shows exact client clickstream when analyticsEvents are available, then fills gaps from business records. For back-office actions like “opened report” or “changed dashboard filter,” add the same event logger inside the store/admin app.</p>
             </div>
           </SectionCard>
         </div>
