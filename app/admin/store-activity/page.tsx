@@ -385,7 +385,7 @@ function activityForRecord(record: RecordDoc, moduleId: string, moduleLabel: str
     const kind = orderKind(record);
     const item = itemName(record);
     const buyer = buyerName(record);
-    const quickPay = /quick.?pay|sedifex quick pay/.test([record.sourceLabel, record.sourceChannel, record.source].map(valueText).join(' ').toLowerCase());
+    const quickPay = /quick.?pay|sedifex quick pay/.test([record.sourceLabel, record.sourceChannel, record.source].map((value) => valueText(value)).join(' ').toLowerCase());
     tone = amount > 0 ? 'green' : 'blue';
     if (/delivered|completed/.test(status)) {
       action = kind === 'product' ? 'Delivered product order' : kind === 'booking' ? 'Completed booking' : 'Completed service payment';
