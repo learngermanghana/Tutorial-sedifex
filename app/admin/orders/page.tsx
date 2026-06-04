@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, Bell, CheckCircle2, Clock3, Download, PackageCheck, PackageOpen, Search, ShoppingCart, Truck, XCircle } from 'lucide-react';
+import { isAcceptedWithoutPayment, paymentAuditLabel, paymentReferenceValue, settlementStatusForOrder } from '@/lib/payment-audit';
 
 type OrderItem = {
   name?: string;
@@ -35,6 +36,7 @@ type OrderRecord = {
   finalTotal?: number;
   final_total?: number;
   paymentStatus?: string;
+  payment_status?: string;
   orderStatus?: string;
   bookingStatus?: string;
   fulfillmentStatus?: string;
@@ -42,11 +44,25 @@ type OrderRecord = {
   fulfillmentType?: string;
   paymentCollectionMode?: string;
   paymentMethod?: string;
+  payment_method?: string;
   paymentProvider?: string;
+  payment_provider?: string;
+  paymentReference?: string;
+  payment_reference?: string;
+  reference?: string;
+  paystackReference?: string;
+  transactionReference?: string;
+  settlementStatus?: string;
+  settlement_status?: string;
   recordType?: string;
   orderType?: string;
   storeOnly?: boolean;
   cashConfirmed?: boolean;
+  cash_confirmed?: boolean;
+  requiresPaymentReview?: boolean;
+  paymentAuditStatus?: string;
+  paymentAuditSeverity?: string;
+  paymentAuditReason?: string;
   paymentUpdatedAt?: unknown;
   deliveredAt?: unknown;
   completedAt?: unknown;
@@ -62,7 +78,7 @@ type OrderRecord = {
   statusHistory?: unknown[];
 };
 
-type Bucket = 'all' | 'new' | 'accepted' | 'preparing' | 'out_for_delivery' | 'delivered' | 'problem' | 'delayed';
+type Bucket = 'all' | 'new' | 'payment_issues' | 'accepted' | 'preparing' | 'out_for_delivery' | 'delivered' | 'problem' | 'delayed';
 type StatusAction = 'received' | 'preparing' | 'out_for_delivery' | 'delivered' | 'confirm_service' | 'service_in_progress' | 'service_completed' | 'complete_manual';
 type OrderKind = 'product' | 'service' | 'manual';
 
@@ -76,6 +92,7 @@ const POLL_MS = 20000;
 const BUCKET_LABELS: Record<Bucket, string> = {
   all: 'All orders',
   new: 'New / paid',
+  payment_issues: 'Payment issues',
   accepted: 'Accepted',
   preparing: 'Preparing',
   out_for_delivery: 'Out for delivery',
@@ -198,6 +215,30 @@ function storeLabel(order: OrderRecord) {
   return clean(order.storeName || order.merchantName, clean(order.storeId, 'Unknown store'));
 }
 
+function paymentStatusText(order: OrderRecord) {
+  return clean(order.paymentStatus || order.payment_status, 'missing');
+}
+
+function paymentMethodText(order: OrderRecord) {
+  return clean(order.paymentMethod || order.payment_method || order.paymentCollectionMode, '—');
+}
+
+function paymentProviderText(order: OrderRecord) {
+  return clean(order.paymentProvider || order.payment_provider, '—');
+}
+
+function paymentReferenceText(order: OrderRecord) {
+  return paymentReferenceValue(order) || '—';
+}
+
+function cashConfirmedText(order: OrderRecord) {
+  return order.cashConfirmed === true || order.cash_confirmed === true ? 'true' : 'false';
+}
+
+function settlementStatusText(order: OrderRecord) {
+  return settlementStatusForOrder(order) || clean(order.settlementStatus || order.settlement_status, '—');
+}
+
 function statusText(order: OrderRecord) {
   const parts = [order.orderStatus, order.bookingStatus, order.fulfillmentStatus, order.deliveryStatus, order.paymentStatus]
     .map((value) => clean(value))
@@ -270,6 +311,7 @@ function isDelayed(order: OrderRecord) {
 }
 
 function bucketTone(bucket: Bucket) {
+  if (bucket === 'payment_issues') return 'bg-amber-100 text-amber-800 ring-amber-200';
   if (bucket === 'delivered') return 'bg-emerald-100 text-emerald-700 ring-emerald-200';
   if (bucket === 'problem') return 'bg-rose-100 text-rose-700 ring-rose-200';
   if (bucket === 'delayed') return 'bg-amber-100 text-amber-800 ring-amber-200';
@@ -280,6 +322,7 @@ function bucketTone(bucket: Bucket) {
 }
 
 function bucketIcon(bucket: Bucket) {
+  if (bucket === 'payment_issues') return <AlertTriangle className="h-4 w-4" />;
   if (bucket === 'delivered') return <CheckCircle2 className="h-4 w-4" />;
   if (bucket === 'problem') return <XCircle className="h-4 w-4" />;
   if (bucket === 'delayed') return <AlertTriangle className="h-4 w-4" />;
@@ -317,6 +360,11 @@ function matchesSearch(order: OrderRecord, query: string) {
     order.source,
     orderKind(order),
     statusText(order),
+    paymentStatusText(order),
+    paymentMethodText(order),
+    paymentProviderText(order),
+    paymentReferenceText(order),
+    settlementStatusText(order),
     ...(order.items || []).flatMap((item) => [item.name, item.productName, item.itemName, item.serviceName]),
   ].map((value) => clean(value)).join(' ').toLowerCase();
   return haystack.includes(query.toLowerCase());
@@ -397,9 +445,10 @@ export default function OrdersPage() {
   };
 
   const stats = useMemo(() => {
-    const initial = { all: orders.length, new: 0, accepted: 0, preparing: 0, out_for_delivery: 0, delivered: 0, problem: 0, delayed: 0 } as Record<Bucket, number>;
+    const initial = { all: orders.length, new: 0, payment_issues: 0, accepted: 0, preparing: 0, out_for_delivery: 0, delivered: 0, problem: 0, delayed: 0 } as Record<Bucket, number>;
     orders.forEach((order) => {
       initial[bucketFor(order)] += 1;
+      if (isAcceptedWithoutPayment(order)) initial.payment_issues += 1;
       if (isDelayed(order)) initial.delayed += 1;
     });
     return initial;
@@ -415,7 +464,7 @@ export default function OrdersPage() {
   const filtered = useMemo(() => {
     return orders.filter((order) => {
       const bucket = bucketFor(order);
-      const bucketMatch = activeBucket === 'all' ? true : activeBucket === 'delayed' ? isDelayed(order) : bucket === activeBucket;
+      const bucketMatch = activeBucket === 'all' ? true : activeBucket === 'payment_issues' ? isAcceptedWithoutPayment(order) : activeBucket === 'delayed' ? isDelayed(order) : bucket === activeBucket;
       return bucketMatch && matchesSearch(order, query.trim());
     });
   }, [orders, activeBucket, query]);
@@ -423,7 +472,7 @@ export default function OrdersPage() {
   const revenue = useMemo(() => filtered.reduce((sum, order) => sum + amountNumber(order), 0), [filtered]);
 
   const downloadCsv = () => {
-    const headers = ['Order ID', 'Kind', 'Buyer', 'Phone', 'Customer Email', 'Store', 'Store ID', 'Amount', 'Bucket', 'Status', 'Age', 'Payment Updated At', 'Item Count', 'First Item', 'Source'];
+    const headers = ['Order ID', 'Kind', 'Buyer', 'Phone', 'Customer Email', 'Store', 'Store ID', 'Amount', 'Bucket', 'Status', 'Payment status', 'Payment method', 'Payment provider', 'Payment reference', 'Cash confirmed', 'Settlement status', 'Age', 'Payment Updated At', 'Item Count', 'First Item', 'Source'];
     const lines = filtered.map((order) => {
       const firstItem = (order.items || [])[0];
       return [
@@ -437,6 +486,12 @@ export default function OrdersPage() {
         money(order),
         BUCKET_LABELS[bucketFor(order)],
         statusText(order),
+        paymentStatusText(order),
+        paymentMethodText(order),
+        paymentProviderText(order),
+        paymentReferenceText(order),
+        cashConfirmedText(order),
+        settlementStatusText(order),
         ageLabel(order),
         formatDate(order.paymentUpdatedAt || order.updatedAt || order.updateTime || order.createdAt || order.createTime),
         itemCount(order),
@@ -465,7 +520,7 @@ export default function OrdersPage() {
             </div>
             <h2 className="mt-5 max-w-4xl text-3xl font-bold tracking-tight sm:text-4xl">Manage Sedifex orders on behalf of stores.</h2>
             <p className="mt-4 max-w-3xl text-sm leading-7 text-slate-300">
-              Product orders, service bookings, and manual entries now show the right admin action buttons for their type.
+              Product orders, service bookings, and manual entries now keep payment status separate from fulfillment progress.
             </p>
           </div>
           <button type="button" onClick={downloadCsv} className="inline-flex items-center justify-center gap-2 rounded-2xl bg-white px-4 py-3 text-sm font-bold text-slate-950 hover:bg-slate-100">
@@ -486,7 +541,7 @@ export default function OrdersPage() {
       <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8">
-            {(['all', 'new', 'accepted', 'preparing', 'out_for_delivery', 'delivered', 'problem', 'delayed'] as Bucket[]).map((bucket) => (
+            {(['all', 'new', 'payment_issues', 'accepted', 'preparing', 'out_for_delivery', 'delivered', 'problem', 'delayed'] as Bucket[]).map((bucket) => (
               <button
                 key={bucket}
                 type="button"
@@ -518,7 +573,8 @@ export default function OrdersPage() {
               {filtered.slice(0, 100).map((order) => {
                 const bucket = bucketFor(order);
                 const delayed = isDelayed(order);
-                const shownBucket: Bucket = delayed && bucket !== 'problem' && bucket !== 'delivered' ? 'delayed' : bucket;
+                const shownBucket: Bucket = isAcceptedWithoutPayment(order) ? 'payment_issues' : delayed && bucket !== 'problem' && bucket !== 'delivered' ? 'delayed' : bucket;
+                const paymentIssue = isAcceptedWithoutPayment(order);
                 const kind = orderKind(order);
                 const actionOptions = actionsForOrder(order);
                 return (
@@ -537,10 +593,24 @@ export default function OrdersPage() {
                     <div>
                       <p className="font-bold text-slate-950">{money(order)}</p>
                       <p className="text-xs text-slate-500">{itemCount(order)} item(s)</p>
+                      <div className="mt-2 space-y-1 text-[11px] text-slate-500">
+                        <p><span className="font-semibold text-slate-700">Pay:</span> {paymentStatusText(order)}</p>
+                        <p><span className="font-semibold text-slate-700">Method:</span> {paymentMethodText(order)}</p>
+                        <p><span className="font-semibold text-slate-700">Provider:</span> {paymentProviderText(order)}</p>
+                        <p className="break-all"><span className="font-semibold text-slate-700">Ref:</span> {paymentReferenceText(order)}</p>
+                        <p><span className="font-semibold text-slate-700">Cash:</span> {cashConfirmedText(order)}</p>
+                        <p><span className="font-semibold text-slate-700">Settlement:</span> {settlementStatusText(order)}</p>
+                      </div>
                     </div>
                     <div>
                       <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-bold ring-1 ${bucketTone(shownBucket)}`}>{bucketIcon(shownBucket)} {BUCKET_LABELS[shownBucket]}</span>
                       <p className="mt-2 text-xs text-slate-500">{statusText(order)}</p>
+                      {paymentIssue ? (
+                        <div className="mt-2 rounded-xl border border-amber-200 bg-amber-50 p-2 text-xs text-amber-900">
+                          <p className="font-bold">{paymentAuditLabel(order)}</p>
+                          <p className="mt-1 leading-5">This order was received or accepted, but Sedifex has not confirmed payment yet. Confirm cash or verify online payment before fulfillment.</p>
+                        </div>
+                      ) : null}
                     </div>
                     <div className="min-w-0">
                       <div className="flex items-start gap-2">
