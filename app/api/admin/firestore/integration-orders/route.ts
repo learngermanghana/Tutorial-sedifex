@@ -1,7 +1,7 @@
 import { FieldValue, Timestamp } from 'firebase-admin/firestore';
 import { NextResponse } from 'next/server';
 import { adminFirestore, listFirestoreDocuments } from '@/lib/firebase-admin';
-import { isAcceptedWithoutPayment, isCancelledOrFailedOrder, isPaymentPending, paymentAuditPatch } from '@/lib/payment-audit';
+import { isAcceptedWithoutPayment, isPaymentPending, paymentAuditPatch } from '@/lib/payment-audit';
 import { sendPaymentNotConfirmedEmail } from '@/lib/payment-audit-email';
 
 type RawRecord = Record<string, unknown>;
@@ -51,7 +51,7 @@ function paymentEmailPatch(reason: string) {
 
 function shouldSendDelayedPaymentEmail(order: RawRecord) {
   if (order.paymentNotConfirmedEmailSent === true) return false;
-  if (isCancelledOrFailedOrder(order) || !isPaymentPending(order)) return false;
+  if (!isPaymentPending(order)) return false;
   const created = orderTime(order);
   return Boolean(created && Date.now() - created >= 10 * 60 * 1000);
 }

@@ -3,8 +3,6 @@ export type PaymentAuditOrder = Record<string, unknown>;
 const CONFIRMED_PAYMENT_STATUSES = new Set(['success', 'successful', 'paid', 'confirmed', 'captured', 'paid_cash']);
 const ONLINE_CONFIRMED_PAYMENT_STATUSES = new Set(['success', 'successful', 'paid', 'confirmed', 'captured']);
 const PENDING_PAYMENT_STATUSES = new Set(['pending', 'awaiting', 'checkout', 'unpaid', 'initiated', '']);
-const CANCELLED_OR_FAILED_STATUSES = /cancel|cancelled|canceled|refund|refunded|failed|payment_failed|checkout_failed|abandoned|declined|void|voided/;
-
 const FULFILLMENT_PROGRESS_STATUSES = new Set([
   'accepted',
   'confirmed',
@@ -126,27 +124,8 @@ export function hasFulfillmentProgress(order: PaymentAuditOrder) {
   return statuses.some((status) => FULFILLMENT_PROGRESS_STATUSES.has(status)) || Boolean(order.receivedAt || order.deliveredAt || order.completedAt);
 }
 
-export function isCancelledOrFailedOrder(order: PaymentAuditOrder) {
-  const combined = [
-    order.orderStatus,
-    order.order_status,
-    order.bookingStatus,
-    order.booking_status,
-    order.fulfillmentStatus,
-    order.fulfillment_status,
-    order.deliveryStatus,
-    order.delivery_status,
-    order.paymentStatus,
-    order.payment_status,
-    order.checkoutStatus,
-    order.checkout_status,
-  ].map((value) => clean(value).toLowerCase().replace(/\s+/g, '_')).join(' ');
-
-  return CANCELLED_OR_FAILED_STATUSES.test(combined) || Boolean(order.cancelledAt || order.canceledAt || order.refundedAt || order.failedAt);
-}
-
 export function isAcceptedWithoutPayment(order: PaymentAuditOrder) {
-  return !isCancelledOrFailedOrder(order) && hasFulfillmentProgress(order) && !isPaymentConfirmed(order);
+  return hasFulfillmentProgress(order) && !isPaymentConfirmed(order);
 }
 
 export function paymentAuditLabel(order: PaymentAuditOrder) {
@@ -166,7 +145,7 @@ export function settlementStatusForOrder(order: PaymentAuditOrder) {
 export function paymentAuditPatch(order: PaymentAuditOrder, updatedAt: unknown) {
   const settlementStatus = settlementStatusForOrder(order);
 
-  if (isCancelledOrFailedOrder(order) || !isPaymentPending(order)) {
+  if (!isPaymentPending(order)) {
     return settlementStatus ? { settlementStatus } : {};
   }
 

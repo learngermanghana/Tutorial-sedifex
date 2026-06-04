@@ -112,8 +112,7 @@ export async function sendPaymentNotConfirmedEmail(order: EmailOrder, store: Ema
       html: `<pre style="font-family:Arial,sans-serif;white-space:pre-wrap">${textBody.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')}</pre>`,
       recipients,
       audience: 'payment_audit',
-      source: 'sedifexadmin_marketing_center',
-      type: 'marketing_email_campaign',
+      source: 'sedifexadmin_payment_audit',
       campaignOwner: 'sedifex',
     }),
   });
