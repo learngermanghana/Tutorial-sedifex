@@ -1,6 +1,8 @@
 import { FieldValue, Timestamp } from 'firebase-admin/firestore';
 import { NextResponse } from 'next/server';
 import { adminFirestore } from '@/lib/firebase-admin';
+import { isPaymentConfirmed, paymentAuditPatch, isOnlineCheckoutOrder, isCashLikePayment } from '@/lib/payment-audit';
+import { sendPaymentNotConfirmedEmail } from '@/lib/payment-audit-email';
 
 type StatusAction =
   | 'received'
@@ -17,6 +19,7 @@ type StatusBody = {
   storeId?: unknown;
   action?: unknown;
   note?: unknown;
+  paymentOverride?: unknown;
 };
 
 const ACTION_LABELS: Record<StatusAction, string> = {
@@ -38,6 +41,10 @@ function isAllowedRole(role?: string) {
   return role === 'super_admin' || role === 'ops_admin' || role === 'support';
 }
 
+function canOverridePayment(role?: string) {
+  return role === 'super_admin' || role === 'support';
+}
+
 function clean(value: unknown, max = 500) {
   return typeof value === 'string' ? value.trim().slice(0, max) : '';
 }
@@ -56,6 +63,37 @@ function isStatusAction(value: string): value is StatusAction {
 function storeIdFromOrder(order: FirebaseFirestore.DocumentData | undefined, fallback = '') {
   if (!order) return fallback;
   return clean(order.storeId || order.store_id || order.merchantId || order.merchant_id || order.businessId || order.business_id) || fallback;
+}
+
+function isTerminalAction(action: StatusAction) {
+  return action === 'delivered' || action === 'service_completed' || action === 'complete_manual';
+}
+
+function shouldWarnForAction(action: StatusAction) {
+  return action === 'received' || action === 'confirm_service' || action === 'preparing' || action === 'out_for_delivery' || action === 'service_in_progress';
+}
+
+function auditHistoryEntry(role: string | undefined) {
+  return {
+    action: 'payment_audit_warning',
+    status: 'payment_not_confirmed',
+    actor: 'sedifex_admin',
+    actorRole: role,
+    source: 'sedifexadmin',
+    note: 'Order received/accepted but payment has not been confirmed.',
+    createdAt: Timestamp.now(),
+    createdAtIso: new Date().toISOString(),
+  };
+}
+
+function emailSentPatch(reason: string) {
+  const now = Timestamp.now();
+  return {
+    paymentNotConfirmedEmailSent: true,
+    paymentNotConfirmedEmailSentAt: now,
+    paymentNotConfirmedEmailCount: FieldValue.increment(1),
+    lastPaymentNotConfirmedEmailReason: reason,
+  };
 }
 
 function statusPatch(action: StatusAction) {
@@ -200,6 +238,7 @@ export async function POST(req: Request) {
     const requestedStoreId = clean(body?.storeId, 220);
     const action = clean(body?.action, 60);
     const note = clean(body?.note, 1000);
+    const paymentOverride = body?.paymentOverride === true;
 
     if (!orderId) return NextResponse.json({ ok: false, error: 'orderId is required.' }, { status: 400 });
     if (!isStatusAction(action)) return NextResponse.json({ ok: false, error: 'Unsupported status action.', action }, { status: 400 });
@@ -208,7 +247,47 @@ export async function POST(req: Request) {
     const orderRef = db.collection('integrationOrders').doc(orderId);
     const orderSnapshot = await orderRef.get();
     const orderData = orderSnapshot.exists ? orderSnapshot.data() : undefined;
+    if (!orderData) return NextResponse.json({ ok: false, error: 'Order not found.' }, { status: 404 });
+
     const storeId = storeIdFromOrder(orderData, requestedStoreId);
+    const paymentConfirmed = isPaymentConfirmed(orderData);
+    const onlineCheckout = isOnlineCheckoutOrder(orderData);
+    const cashLike = isCashLikePayment(orderData);
+
+    if (!paymentConfirmed && isTerminalAction(action) && !paymentOverride) {
+      const blockedType = onlineCheckout ? 'online checkout order' : cashLike ? 'cash order' : 'order';
+      const blockedAuditPatch = {
+        ...paymentAuditPatch(orderData, Timestamp.now()),
+        statusHistory: FieldValue.arrayUnion(auditHistoryEntry(role)),
+      };
+      const blockedBatch = db.batch();
+      blockedBatch.set(orderRef, blockedAuditPatch, { merge: true });
+      if (storeId) blockedBatch.set(db.collection('stores').doc(storeId).collection('integrationOrders').doc(orderId), blockedAuditPatch, { merge: true });
+      await blockedBatch.commit();
+
+      return NextResponse.json({
+        ok: false,
+        error: `Payment has not been confirmed for this ${blockedType}. Confirm cash received or wait for online payment verification before marking it delivered or completed.`,
+        code: 'payment_not_confirmed',
+        requiresPaymentReview: true,
+      }, { status: 409 });
+    }
+
+    if (!paymentConfirmed && paymentOverride) {
+      if (!canOverridePayment(role)) return NextResponse.json({ ok: false, error: 'Only support or super_admin can use a payment override.', code: 'payment_override_forbidden' }, { status: 403 });
+      if (!note) return NextResponse.json({ ok: false, error: 'A note is required when using a payment override.', code: 'payment_override_note_required' }, { status: 400 });
+    }
+
+    let storeData: FirebaseFirestore.DocumentData = {};
+    if (storeId) {
+      try {
+        const storeSnapshot = await db.collection('stores').doc(storeId).get();
+        storeData = storeSnapshot.exists ? storeSnapshot.data() || {} : {};
+      } catch {
+        storeData = {};
+      }
+    }
+
     const patch = statusPatch(action);
     const historyEntry = {
       status: action,
@@ -221,9 +300,35 @@ export async function POST(req: Request) {
       createdAtIso: new Date().toISOString(),
     };
 
+    const now = Timestamp.now();
+    const needsAuditWarning = !paymentConfirmed && (shouldWarnForAction(action) || isTerminalAction(action));
+    const auditPatch = paymentAuditPatch({ ...orderData, ...patch }, now);
+    const historyEntries = needsAuditWarning ? [historyEntry, auditHistoryEntry(role)] : [historyEntry];
+
+    const overridePatch = !paymentConfirmed && paymentOverride ? {
+      paymentOverrideUsed: true,
+      paymentOverrideBy: 'sedifex_admin',
+      paymentOverrideAt: now,
+      paymentOverrideNote: note,
+      requiresPaymentReview: true,
+    } : {};
+
+    let emailPatch: Record<string, unknown> = {};
+    if (needsAuditWarning && orderData.paymentNotConfirmedEmailSent !== true) {
+      try {
+        const emailResult = await sendPaymentNotConfirmedEmail({ ...orderData, id: orderId }, storeData);
+        if (emailResult.sent) emailPatch = emailSentPatch(`status_${action}`);
+      } catch (emailError) {
+        console.error('[integration-order-status] payment audit email failed', emailError);
+      }
+    }
+
     const update = {
       ...patch,
-      statusHistory: FieldValue.arrayUnion(historyEntry),
+      ...auditPatch,
+      ...overridePatch,
+      ...emailPatch,
+      statusHistory: FieldValue.arrayUnion(...historyEntries),
     };
 
     const batch = db.batch();
