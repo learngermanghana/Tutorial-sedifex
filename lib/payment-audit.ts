@@ -97,6 +97,7 @@ export function isOnlinePaymentConfirmed(order: PaymentAuditOrder) {
 }
 
 export function isPaymentConfirmed(order: PaymentAuditOrder) {
+  if (order.paymentReceiptConfirmed === true || order.payment_receipt_confirmed === true) return true;
   if (isCashConfirmed(order)) return true;
   if (isOnlinePaymentConfirmed(order)) return true;
   const status = normalizedPaymentStatus(order);
