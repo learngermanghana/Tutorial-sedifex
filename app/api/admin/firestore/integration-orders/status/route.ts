@@ -107,7 +107,7 @@ function emailSentPatch(reason: string) {
   };
 }
 
-function statusPatch(action: StatusAction) {
+function statusPatch(action: StatusAction): Record<string, unknown> {
   const now = Timestamp.now();
   const base: Record<string, unknown> = {
     adminLastStatusAction: action,
