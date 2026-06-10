@@ -32,7 +32,7 @@ function record(value: unknown): Record<string, unknown> {
 /**
  * Sedifex Admin owns fulfillment only when the order explicitly identifies
  * SedifexMarket as its source. Website, integration, and unknown orders remain
- * store-managed so Admin only audits whether payment was received.
+ * store-managed so Admin only audits payment receipt and store payout.
  */
 export function classifyOrderWorkflow(order: OrderWorkflowRecord): OrderWorkflowClassification {
   const metadata = record(order.metadata);
@@ -71,7 +71,7 @@ export function classifyOrderWorkflow(order: OrderWorkflowRecord): OrderWorkflow
   return {
     owner: 'store',
     label: 'Store managed',
-    description: 'Sedifex Admin confirms payment for audit records. Booking, follow-up, delivery, and completion are handled in the store UI.',
+    description: 'Sedifex Admin confirms payment and records the store payout. Booking, follow-up, delivery, and completion are handled in the store UI.',
     allowsAdminFulfillment: false,
   };
 }
