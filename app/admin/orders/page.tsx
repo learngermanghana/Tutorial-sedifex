@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, Bell, CheckCircle2, Clock3, Download, PackageCheck, PackageOpen, Search, ShoppingCart, Truck, XCircle } from 'lucide-react';
-import { isAcceptedWithoutPayment, paymentAuditLabel, paymentReferenceValue, settlementStatusForOrder } from '@/lib/payment-audit';
+import { isAcceptedWithoutPayment, isPaymentConfirmed, paymentAuditLabel, paymentReferenceValue, settlementStatusForOrder } from '@/lib/payment-audit';
+import { classifyOrderWorkflow } from '@/lib/order-workflow';
 
 type OrderItem = {
   name?: string;
@@ -79,7 +80,7 @@ type OrderRecord = {
 };
 
 type Bucket = 'all' | 'new' | 'payment_issues' | 'accepted' | 'preparing' | 'out_for_delivery' | 'delivered' | 'problem' | 'delayed';
-type StatusAction = 'received' | 'preparing' | 'out_for_delivery' | 'delivered' | 'confirm_service' | 'service_in_progress' | 'service_completed' | 'complete_manual';
+type StatusAction = 'confirm_payment' | 'received' | 'preparing' | 'out_for_delivery' | 'delivered' | 'confirm_service' | 'service_in_progress' | 'service_completed' | 'complete_manual';
 type OrderKind = 'product' | 'service' | 'manual';
 
 type ActionOption = {
@@ -102,6 +103,7 @@ const BUCKET_LABELS: Record<Bucket, string> = {
 };
 
 const STATUS_ACTION_LABELS: Record<StatusAction, string> = {
+  confirm_payment: 'Confirm payment received',
   received: 'Accept order',
   preparing: 'Preparing',
   out_for_delivery: 'Out for delivery',
@@ -111,6 +113,8 @@ const STATUS_ACTION_LABELS: Record<StatusAction, string> = {
   service_completed: 'Service completed',
   complete_manual: 'Mark completed',
 };
+
+const PAYMENT_ACTION: ActionOption = { id: 'confirm_payment', label: 'Confirm payment received', tone: 'emerald' };
 
 const PRODUCT_ACTIONS: ActionOption[] = [
   { id: 'received', label: 'Accept order', tone: 'slate' },
@@ -275,10 +279,13 @@ function kindLabel(kind: OrderKind) {
 }
 
 function actionsForOrder(order: OrderRecord): ActionOption[] {
+  const paymentActions = isPaymentConfirmed(order) ? [] : [PAYMENT_ACTION];
+  if (!classifyOrderWorkflow(order).allowsAdminFulfillment) return paymentActions;
+
   const kind = orderKind(order);
-  if (kind === 'manual') return MANUAL_ACTIONS;
-  if (kind === 'service') return SERVICE_ACTIONS;
-  return PRODUCT_ACTIONS;
+  if (kind === 'manual') return [...paymentActions, ...MANUAL_ACTIONS];
+  if (kind === 'service') return [...paymentActions, ...SERVICE_ACTIONS];
+  return [...paymentActions, ...PRODUCT_ACTIONS];
 }
 
 function bucketFor(order: OrderRecord): Bucket {
@@ -420,7 +427,10 @@ export default function OrdersPage() {
 
   const updateOrderStatus = async (order: OrderRecord, action: StatusAction) => {
     const label = STATUS_ACTION_LABELS[action];
-    const ok = window.confirm(`Mark this ${kindLabel(orderKind(order)).toLowerCase()} as ${label}? This will update the order on behalf of the store.`);
+    const prompt = action === 'confirm_payment'
+      ? 'Confirm that Sedifex received this payment? This creates an admin audit record and does not complete the order.'
+      : `Mark this ${kindLabel(orderKind(order)).toLowerCase()} as ${label}? SedifexMarket is responsible for following this order through completion.`;
+    const ok = window.confirm(prompt);
     if (!ok) return;
 
     setUpdatingOrderId(`${order.id}-${action}`);
@@ -577,6 +587,7 @@ export default function OrdersPage() {
                 const paymentIssue = isAcceptedWithoutPayment(order);
                 const kind = orderKind(order);
                 const actionOptions = actionsForOrder(order);
+                const workflow = classifyOrderWorkflow(order);
                 return (
                   <div key={order.id} className="grid gap-4 px-4 py-4 text-sm xl:grid-cols-[1.05fr_0.95fr_0.75fr_0.9fr_0.95fr_0.8fr_1.05fr] xl:items-center">
                     <div className="min-w-0">
@@ -589,6 +600,7 @@ export default function OrdersPage() {
                       <p className="break-all text-xs text-slate-500">{order.storeId || 'No store ID'}</p>
                       <p className="text-xs text-slate-400">{order.sourceLabel || order.sourceChannel || order.source || '—'}</p>
                       <span className={`mt-2 inline-flex rounded-full px-2 py-0.5 text-[11px] font-bold ${kind === 'product' ? 'bg-blue-50 text-blue-700' : kind === 'service' ? 'bg-indigo-50 text-indigo-700' : 'bg-amber-50 text-amber-800'}`}>{kindLabel(kind)}</span>
+                      <span className={`ml-1 mt-2 inline-flex rounded-full px-2 py-0.5 text-[11px] font-bold ${workflow.allowsAdminFulfillment ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-700'}`}>{workflow.label}</span>
                     </div>
                     <div>
                       <p className="font-bold text-slate-950">{money(order)}</p>
@@ -632,8 +644,10 @@ export default function OrdersPage() {
                       {order.deliveredAt ? <p className="mt-1 text-xs text-emerald-600">Delivered: {formatDate(order.deliveredAt)}</p> : null}
                       {order.completedAt ? <p className="mt-1 text-xs text-emerald-600">Completed: {formatDate(order.completedAt)}</p> : null}
                     </div>
-                    <div className="flex flex-wrap gap-1.5">
-                      {actionOptions.map((action) => (
+                    <div>
+                      <p className="mb-2 text-[11px] leading-4 text-slate-500">{workflow.description}</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {actionOptions.map((action) => (
                         <button
                           key={`${order.id}-${action.id}`}
                           type="button"
@@ -643,7 +657,9 @@ export default function OrdersPage() {
                         >
                           {updatingOrderId === `${order.id}-${action.id}` ? 'Updating…' : action.label}
                         </button>
-                      ))}
+                        ))}
+                        {actionOptions.length === 0 ? <span className="text-[11px] font-semibold text-emerald-700">Payment audit complete</span> : null}
+                      </div>
                     </div>
                   </div>
                 );

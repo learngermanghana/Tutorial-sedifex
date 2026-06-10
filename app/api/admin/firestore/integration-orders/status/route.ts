@@ -3,8 +3,10 @@ import { NextResponse } from 'next/server';
 import { adminFirestore } from '@/lib/firebase-admin';
 import { isPaymentConfirmed, paymentAuditPatch, isOnlineCheckoutOrder, isCashLikePayment } from '@/lib/payment-audit';
 import { sendPaymentNotConfirmedEmail } from '@/lib/payment-audit-email';
+import { classifyOrderWorkflow } from '@/lib/order-workflow';
 
 type StatusAction =
+  | 'confirm_payment'
   | 'received'
   | 'preparing'
   | 'out_for_delivery'
@@ -23,6 +25,7 @@ type StatusBody = {
 };
 
 const ACTION_LABELS: Record<StatusAction, string> = {
+  confirm_payment: 'Payment receipt confirmed for audit',
   received: 'Accepted by store',
   preparing: 'Preparing product',
   out_for_delivery: 'Out for delivery',
@@ -50,7 +53,8 @@ function clean(value: unknown, max = 500) {
 }
 
 function isStatusAction(value: string): value is StatusAction {
-  return value === 'received'
+  return value === 'confirm_payment'
+    || value === 'received'
     || value === 'preparing'
     || value === 'out_for_delivery'
     || value === 'delivered'
@@ -63,6 +67,10 @@ function isStatusAction(value: string): value is StatusAction {
 function storeIdFromOrder(order: FirebaseFirestore.DocumentData | undefined, fallback = '') {
   if (!order) return fallback;
   return clean(order.storeId || order.store_id || order.merchantId || order.merchant_id || order.businessId || order.business_id) || fallback;
+}
+
+function isFulfillmentAction(action: StatusAction) {
+  return action !== 'confirm_payment';
 }
 
 function isTerminalAction(action: StatusAction) {
@@ -107,6 +115,21 @@ function statusPatch(action: StatusAction) {
     updatedBy: 'sedifex_admin',
     updatedByRole: 'admin',
   };
+
+  if (action === 'confirm_payment') {
+    return {
+      ...base,
+      paymentReceiptConfirmed: true,
+      payment_receipt_confirmed: true,
+      paymentReceiptConfirmedAt: now,
+      paymentReceiptConfirmedBy: 'sedifex_admin',
+      paymentAuditStatus: 'payment_confirmed',
+      paymentAuditSeverity: 'none',
+      paymentAuditReason: 'Sedifex Admin confirmed receipt of payment for audit purposes.',
+      paymentAuditUpdatedAt: now,
+      requiresPaymentReview: false,
+    };
+  }
 
   if (action === 'received') {
     return {
@@ -253,6 +276,16 @@ export async function POST(req: Request) {
     const paymentConfirmed = isPaymentConfirmed(orderData);
     const onlineCheckout = isOnlineCheckoutOrder(orderData);
     const cashLike = isCashLikePayment(orderData);
+    const workflow = classifyOrderWorkflow(orderData);
+
+    if (isFulfillmentAction(action) && !workflow.allowsAdminFulfillment) {
+      return NextResponse.json({
+        ok: false,
+        error: 'This order is store-managed. Sedifex Admin may confirm payment for auditing, but booking, follow-up, delivery, and completion must be handled in the store UI.',
+        code: 'store_managed_fulfillment',
+        workflowOwner: workflow.owner,
+      }, { status: 409 });
+    }
 
     if (!paymentConfirmed && isTerminalAction(action) && !paymentOverride) {
       const blockedType = onlineCheckout ? 'online checkout order' : cashLike ? 'cash order' : 'order';
