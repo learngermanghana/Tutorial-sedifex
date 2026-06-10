@@ -7,6 +7,7 @@ import { classifyOrderWorkflow } from '@/lib/order-workflow';
 
 type StatusAction =
   | 'confirm_payment'
+  | 'mark_store_paid'
   | 'received'
   | 'preparing'
   | 'out_for_delivery'
@@ -26,6 +27,7 @@ type StatusBody = {
 
 const ACTION_LABELS: Record<StatusAction, string> = {
   confirm_payment: 'Payment receipt confirmed for audit',
+  mark_store_paid: 'Store paid',
   received: 'Accepted by store',
   preparing: 'Preparing product',
   out_for_delivery: 'Out for delivery',
@@ -54,6 +56,7 @@ function clean(value: unknown, max = 500) {
 
 function isStatusAction(value: string): value is StatusAction {
   return value === 'confirm_payment'
+    || value === 'mark_store_paid'
     || value === 'received'
     || value === 'preparing'
     || value === 'out_for_delivery'
@@ -70,7 +73,7 @@ function storeIdFromOrder(order: FirebaseFirestore.DocumentData | undefined, fal
 }
 
 function isFulfillmentAction(action: StatusAction) {
-  return action !== 'confirm_payment';
+  return action !== 'confirm_payment' && action !== 'mark_store_paid';
 }
 
 function isTerminalAction(action: StatusAction) {
@@ -128,6 +131,17 @@ function statusPatch(action: StatusAction) {
       paymentAuditReason: 'Sedifex Admin confirmed receipt of payment for audit purposes.',
       paymentAuditUpdatedAt: now,
       requiresPaymentReview: false,
+    };
+  }
+
+  if (action === 'mark_store_paid') {
+    return {
+      ...base,
+      settlementStatus: 'paid',
+      settlement_status: 'paid',
+      settlementPaidAt: now,
+      settlementPaidBy: 'sedifex_admin',
+      settlementUpdatedAt: now,
     };
   }
 
@@ -284,6 +298,24 @@ export async function POST(req: Request) {
         error: 'This order is store-managed. Sedifex Admin may confirm payment for auditing, but booking, follow-up, delivery, and completion must be handled in the store UI.',
         code: 'store_managed_fulfillment',
         workflowOwner: workflow.owner,
+      }, { status: 409 });
+    }
+
+    if (action === 'mark_store_paid' && workflow.allowsAdminFulfillment) {
+      return NextResponse.json({
+        ok: false,
+        error: 'Store payout actions on the Orders page are only available for store-managed orders.',
+        code: 'sedifexmarket_payout_action',
+        workflowOwner: workflow.owner,
+      }, { status: 409 });
+    }
+
+    if (action === 'mark_store_paid' && !paymentConfirmed) {
+      return NextResponse.json({
+        ok: false,
+        error: 'Confirm payment received before marking the store paid.',
+        code: 'payment_not_confirmed',
+        requiresPaymentReview: true,
       }, { status: 409 });
     }
 

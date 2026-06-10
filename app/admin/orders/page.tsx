@@ -80,7 +80,7 @@ type OrderRecord = {
 };
 
 type Bucket = 'all' | 'new' | 'payment_issues' | 'accepted' | 'preparing' | 'out_for_delivery' | 'delivered' | 'problem' | 'delayed';
-type StatusAction = 'confirm_payment' | 'received' | 'preparing' | 'out_for_delivery' | 'delivered' | 'confirm_service' | 'service_in_progress' | 'service_completed' | 'complete_manual';
+type StatusAction = 'confirm_payment' | 'mark_store_paid' | 'received' | 'preparing' | 'out_for_delivery' | 'delivered' | 'confirm_service' | 'service_in_progress' | 'service_completed' | 'complete_manual';
 type OrderKind = 'product' | 'service' | 'manual';
 
 type ActionOption = {
@@ -104,6 +104,7 @@ const BUCKET_LABELS: Record<Bucket, string> = {
 
 const STATUS_ACTION_LABELS: Record<StatusAction, string> = {
   confirm_payment: 'Confirm payment received',
+  mark_store_paid: 'Mark store paid',
   received: 'Accept order',
   preparing: 'Preparing',
   out_for_delivery: 'Out for delivery',
@@ -115,6 +116,7 @@ const STATUS_ACTION_LABELS: Record<StatusAction, string> = {
 };
 
 const PAYMENT_ACTION: ActionOption = { id: 'confirm_payment', label: 'Confirm payment received', tone: 'emerald' };
+const STORE_PAYOUT_ACTION: ActionOption = { id: 'mark_store_paid', label: 'Mark store paid', tone: 'emerald' };
 
 const PRODUCT_ACTIONS: ActionOption[] = [
   { id: 'received', label: 'Accept order', tone: 'slate' },
@@ -279,8 +281,12 @@ function kindLabel(kind: OrderKind) {
 }
 
 function actionsForOrder(order: OrderRecord): ActionOption[] {
-  const paymentActions = isPaymentConfirmed(order) ? [] : [PAYMENT_ACTION];
-  if (!classifyOrderWorkflow(order).allowsAdminFulfillment) return paymentActions;
+  const paymentConfirmed = isPaymentConfirmed(order);
+  const paymentActions = paymentConfirmed ? [] : [PAYMENT_ACTION];
+  if (!classifyOrderWorkflow(order).allowsAdminFulfillment) {
+    const payoutActions = paymentConfirmed && lower(settlementStatusForOrder(order)) !== 'paid' ? [STORE_PAYOUT_ACTION] : [];
+    return [...paymentActions, ...payoutActions];
+  }
 
   const kind = orderKind(order);
   if (kind === 'manual') return [...paymentActions, ...MANUAL_ACTIONS];
@@ -429,7 +435,9 @@ export default function OrdersPage() {
     const label = STATUS_ACTION_LABELS[action];
     const prompt = action === 'confirm_payment'
       ? 'Confirm that Sedifex received this payment? This creates an admin audit record and does not complete the order.'
-      : `Mark this ${kindLabel(orderKind(order)).toLowerCase()} as ${label}? SedifexMarket is responsible for following this order through completion.`;
+      : action === 'mark_store_paid'
+        ? 'Confirm that Sedifex paid this store? This records the payout and does not complete the order.'
+        : `Mark this ${kindLabel(orderKind(order)).toLowerCase()} as ${label}? SedifexMarket is responsible for following this order through completion.`;
     const ok = window.confirm(prompt);
     if (!ok) return;
 
@@ -658,7 +666,7 @@ export default function OrdersPage() {
                           {updatingOrderId === `${order.id}-${action.id}` ? 'Updating…' : action.label}
                         </button>
                         ))}
-                        {actionOptions.length === 0 ? <span className="text-[11px] font-semibold text-emerald-700">Payment audit complete</span> : null}
+                        {actionOptions.length === 0 ? <span className="text-[11px] font-semibold text-emerald-700">{workflow.allowsAdminFulfillment ? 'Payment audit complete' : 'Payment and payout complete'}</span> : null}
                       </div>
                     </div>
                   </div>
