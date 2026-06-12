@@ -1,4 +1,3 @@
-import { revalidatePath } from 'next/cache';
 import { Megaphone } from 'lucide-react';
 import AdvertManagerClient, { type AdvertRecord } from '../../../components/admin/AdvertManagerClient';
 import { adminFirestore, getFirebaseEnvStatus, listFirestoreDocuments } from '../../../lib/firebase-admin';
@@ -78,7 +77,6 @@ async function saveAdvert(formData: FormData) {
     createdAt: now,
   });
 
-  revalidatePath('/admin/adverts');
 }
 
 async function deleteAdvert(formData: FormData) {
@@ -91,7 +89,6 @@ async function deleteAdvert(formData: FormData) {
   const now = new Date().toISOString();
   await db.collection(AD_COLLECTION).doc(advertId).set({ status: 'expired', deleted: true, deletedAt: now, adminUpdatedAt: now }, { merge: true });
   await db.collection('adminAuditLogs').add({ action: 'marketplace_advert_delete', advertId, actor: 'sedifexadmin', createdAt: now });
-  revalidatePath('/admin/adverts');
 }
 
 async function loadAdverts() {

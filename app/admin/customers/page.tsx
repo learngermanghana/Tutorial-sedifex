@@ -1,4 +1,3 @@
-import { revalidatePath } from 'next/cache';
 import Link from 'next/link';
 import { ArrowUpRight, Mail, MapPin, Phone, Search, Store, UserRound, Users } from 'lucide-react';
 import DeleteCustomerForm from '../../../components/admin/DeleteCustomerForm';
@@ -65,8 +64,6 @@ async function deleteCustomer(formData: FormData) {
     createdAt: new Date().toISOString(),
   });
 
-  revalidatePath('/admin/customers');
-  revalidatePath(`/admin/customers/${customerId}`);
 }
 
 function nestedText(record: RawRecord | undefined, path: string[], fallback = '') {

@@ -1,4 +1,3 @@
-import { revalidatePath } from 'next/cache';
 import Link from 'next/link';
 import { Ban, CheckCircle2, ExternalLink, PackageX, ShieldAlert, Store } from 'lucide-react';
 import { SectionCard, StatCard, StatusBadge } from '../../../../components/admin/ui';
@@ -148,8 +147,6 @@ async function updateStoreApproval(formData: FormData) {
     db.collection('adminAuditLogs').add({ action: `store_${action}`, storeId, actor: 'sedifexadmin', createdAt: now }),
   ]);
 
-  revalidatePath('/admin/google-sync/stores');
-  revalidatePath('/admin/google-sync');
 }
 
 async function blockRiskyProductsForStore(formData: FormData) {
@@ -193,8 +190,6 @@ async function blockRiskyProductsForStore(formData: FormData) {
     createdAt: now,
   });
 
-  revalidatePath('/admin/google-sync/stores');
-  revalidatePath('/admin/google-sync');
 }
 
 export default async function GoogleSyncStoresPage() {

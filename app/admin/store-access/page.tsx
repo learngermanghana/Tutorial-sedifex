@@ -1,4 +1,3 @@
-import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import { AlertTriangle, CheckCircle2, KeyRound, LockKeyhole, Search, ShieldCheck, Store, UserRoundCog } from 'lucide-react';
@@ -168,11 +167,6 @@ async function resetStoreAccess(formData: FormData) {
       }),
     ]);
 
-    revalidatePath('/admin/stores');
-    revalidatePath(`/admin/stores/${storeId}`);
-    revalidatePath(`/admin/stores/${storeId}/edit`);
-    revalidatePath('/admin/store-access');
-    revalidatePath('/admin/store-settings/manage');
 
     successMessage = `Access updated for ${finalEmail || user.uid}.`;
   } catch (error) {

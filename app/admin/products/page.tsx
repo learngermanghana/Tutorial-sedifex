@@ -1,5 +1,4 @@
 import Link from 'next/link';
-import { revalidatePath } from 'next/cache';
 import {
   AlertTriangle,
   ArrowUpRight,
@@ -302,9 +301,6 @@ async function updateCatalogItem(itemPath: string, formData: FormData) {
     });
   }
 
-  revalidatePath('/admin');
-  revalidatePath('/admin/products');
-  if (storeId) revalidatePath(`/admin/stores/${encodeURIComponent(storeId)}`);
 }
 
 function TextInput({ label, name, defaultValue, placeholder, type = 'text' }: { label: string; name: string; defaultValue?: string; placeholder?: string; type?: string }) {

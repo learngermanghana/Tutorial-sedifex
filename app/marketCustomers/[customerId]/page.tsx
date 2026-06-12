@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic';
+
 type MarketOrder = {
   orderId: string;
   clientName: string;

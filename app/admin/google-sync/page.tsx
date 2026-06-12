@@ -1,4 +1,3 @@
-import { revalidatePath } from 'next/cache';
 import Link from 'next/link';
 import {
   Ban,
@@ -416,7 +415,6 @@ async function bulkUpdateGoogleMerchantProducts(formData: FormData) {
     : selectedPaths;
 
   if (pathsToUpdate.length === 0) {
-    revalidatePath('/admin/google-sync');
     return;
   }
 
@@ -496,8 +494,6 @@ async function bulkUpdateGoogleMerchantProducts(formData: FormData) {
     createdAt: now,
   });
 
-  revalidatePath('/admin/google-sync');
-  revalidatePath('/admin/products');
 }
 
 function statusBadge(product: GoogleSyncProduct) {
