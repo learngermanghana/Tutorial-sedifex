@@ -1,4 +1,3 @@
-import Image from 'next/image';
 import Link from 'next/link';
 
 export function TutorialPage({ tutorial }) {
@@ -60,7 +59,7 @@ export function TutorialPage({ tutorial }) {
         <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
           <h2 className="text-lg font-semibold text-slate-900">Screen example</h2>
           <div className="relative mt-4 overflow-hidden rounded-xl border border-slate-200">
-            <Image src={tutorial.screenshot.src} alt={tutorial.screenshot.alt} width={1600} height={1000} className="h-auto w-full" />
+            <img src={tutorial.screenshot.src} alt={tutorial.screenshot.alt} width={1600} height={1000} loading="lazy" decoding="async" className="h-auto w-full" />
           </div>
         </section>
       ) : null}

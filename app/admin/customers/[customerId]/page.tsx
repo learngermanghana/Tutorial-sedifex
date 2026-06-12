@@ -1,4 +1,3 @@
-import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import { ArrowLeft, Mail, Phone, ShoppingBag, Store, UserRound } from 'lucide-react';
@@ -62,8 +61,6 @@ async function deleteCustomer(formData: FormData) {
     createdAt: new Date().toISOString(),
   });
 
-  revalidatePath('/admin/customers');
-  revalidatePath(`/admin/customers/${customerId}`);
   redirect('/admin/customers');
 }
 

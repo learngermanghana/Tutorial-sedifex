@@ -1,4 +1,3 @@
-import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import { ArrowLeft, Save, Store } from 'lucide-react';
@@ -187,9 +186,6 @@ async function updateStore(formData: FormData) {
     }),
   ]);
 
-  revalidatePath('/admin/stores');
-  revalidatePath(`/admin/stores/${storeId}`);
-  revalidatePath(`/admin/stores/${storeId}/edit`);
   redirect(`/admin/stores/${encodeURIComponent(storeId)}`);
 }
 

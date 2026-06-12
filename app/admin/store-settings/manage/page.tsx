@@ -1,4 +1,3 @@
-import { revalidatePath } from 'next/cache';
 import Link from 'next/link';
 import { CheckCircle2, Edit3, Eye, KeyRound, PlugZap, RotateCcw, Settings, Store, ToggleLeft, ToggleRight } from 'lucide-react';
 import { SectionCard, StatCard, StatusBadge } from '../../../../components/admin/ui';
@@ -178,11 +177,6 @@ async function updateStoreSettings(formData: FormData) {
   }
 
   await db.collection('adminAuditLogs').add({ action: `store_settings_${action}`, storeId, actor: 'sedifexadmin', createdAt: now });
-  revalidatePath('/admin/stores');
-  revalidatePath(`/admin/stores/${storeId}`);
-  revalidatePath(`/admin/stores/${storeId}/edit`);
-  revalidatePath('/admin/store-settings');
-  revalidatePath('/admin/store-settings/manage');
 }
 
 export default async function ManageStoreSettingsPage() {

@@ -1,5 +1,4 @@
 import Link from 'next/link';
-import { revalidatePath } from 'next/cache';
 import {
   AlertTriangle,
   ArrowUpRight,
@@ -76,7 +75,6 @@ async function replayAction(formData: FormData) {
     await replayDelivery(endpointId, deliveryId);
   }
 
-  revalidatePath('/admin/deliveries');
 }
 
 export default async function DeliveriesPage({ searchParams }: { searchParams: SearchParams }) {
