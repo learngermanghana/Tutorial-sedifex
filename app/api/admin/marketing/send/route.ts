@@ -182,9 +182,10 @@ export async function POST(req: Request) {
     audience,
     source: 'sedifexadmin_marketing_center',
     campaignOwner: 'sedifex',
+    processAsync: true,
   };
 
-  const timeout = timeoutSignal(25000);
+  const timeout = timeoutSignal(12000);
 
   try {
     const response = await fetch(config.webAppUrl, {
@@ -248,9 +249,9 @@ export async function POST(req: Request) {
     return NextResponse.json({
       ok: false,
       campaignId,
-      error: timedOut ? 'Apps Script did not respond within 25 seconds.' : error instanceof Error ? error.message : 'Unable to send Sedifex marketing email.',
+      error: timedOut ? 'Apps Script did not acknowledge the campaign within 12 seconds.' : error instanceof Error ? error.message : 'Unable to send Sedifex marketing email.',
       detail: timedOut
-        ? 'The Google Apps Script webhook took too long to respond. Make sure the queued Apps Script version is deployed as a new Web App version and that it queues recipients quickly instead of sending all emails before responding.'
+        ? 'The Google Apps Script webhook took too long to respond. Deploy the queued Apps Script version as a new Web App version so it acknowledges campaigns quickly and sends recipients from the background queue.'
         : error instanceof Error ? error.stack : undefined,
       requestSummary: {
         appScriptUrlConfigured: Boolean(config.webAppUrl),
