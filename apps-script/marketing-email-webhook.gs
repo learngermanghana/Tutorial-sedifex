@@ -30,7 +30,9 @@
 
 const LOG_SHEET_NAME = 'Marketing Campaign Logs';
 const SEND_LOG_SHEET_NAME = 'Marketing Send Logs';
+const QUEUE_SHEET_NAME = 'Marketing Send Queue';
 const DEFAULT_MAX_RECIPIENTS = 200;
+const DEFAULT_QUEUE_BATCH_SIZE = 35;
 
 function doGet() {
   return jsonResponse_({
@@ -51,17 +53,20 @@ function doPost(e) {
     verifyRequest_(e, payload);
 
     const campaign = normalizeCampaign_(payload);
-    const result = processCampaign_(campaign);
+    const shouldQueue = payload.processAsync !== false;
+    const result = shouldQueue ? queueCampaign_(campaign) : processCampaign_(campaign);
 
     return jsonResponse_({
       ok: true,
       campaignId: campaign.campaignId,
       mode: getSendMode_(),
       acceptedRecipients: campaign.recipients.length,
-      sent: result.sent,
-      drafted: result.drafted,
-      skipped: result.skipped,
-      failed: result.failed,
+      queued: shouldQueue ? result.queued : 0,
+      processedNow: shouldQueue ? 0 : campaign.recipients.length,
+      sent: result.sent || 0,
+      drafted: result.drafted || 0,
+      skipped: result.skipped || 0,
+      failed: result.failed || 0,
       logSpreadsheetUrl: getLogSpreadsheet_().getUrl(),
     });
   } catch (error) {
@@ -171,6 +176,136 @@ function normalizeCampaign_(payload) {
     recipients: recipients,
     brand: brand,
   };
+}
+
+function queueCampaign_(campaign) {
+  const sheet = getQueueSheet_();
+  const now = new Date();
+  const rows = campaign.recipients.map(function (recipient) {
+    return [
+      now,
+      campaign.campaignId,
+      'pending',
+      campaign.subject,
+      campaign.audience,
+      campaign.senderName,
+      campaign.fromEmail,
+      campaign.replyTo,
+      campaign.textBody,
+      campaign.callToActionUrl,
+      campaign.callToActionLabel,
+      JSON.stringify(campaign.brand),
+      JSON.stringify(recipient),
+      '',
+      '',
+    ];
+  });
+
+  if (rows.length > 0) {
+    sheet.getRange(sheet.getLastRow() + 1, 1, rows.length, rows[0].length).setValues(rows);
+  }
+
+  appendCampaignLog_({
+    campaignId: campaign.campaignId,
+    status: 'queued',
+    subject: campaign.subject,
+    audience: campaign.audience,
+    senderName: campaign.senderName,
+    recipientCount: campaign.recipients.length,
+    sent: 0,
+    drafted: 0,
+    skipped: 0,
+    failed: 0,
+    error: '',
+  });
+
+  ensureQueueTrigger_();
+  return { queued: rows.length };
+}
+
+function processQueuedMarketingEmails() {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+
+  try {
+    const sheet = getQueueSheet_();
+    const values = sheet.getDataRange().getValues();
+    const batchSize = Number(getProperty_('QUEUE_BATCH_SIZE') || DEFAULT_QUEUE_BATCH_SIZE);
+    let processed = 0;
+
+    for (let i = 1; i < values.length && processed < batchSize; i++) {
+      if (String(values[i][2]) !== 'pending') continue;
+      const rowNumber = i + 1;
+      sheet.getRange(rowNumber, 3).setValue('processing');
+
+      try {
+        const campaign = campaignFromQueueRow_(values[i]);
+        const result = processCampaign_({
+          campaignId: campaign.campaignId,
+          audience: campaign.audience,
+          senderName: campaign.senderName,
+          fromEmail: campaign.fromEmail,
+          replyTo: campaign.replyTo,
+          subject: campaign.subject,
+          textBody: campaign.textBody,
+          callToActionUrl: campaign.callToActionUrl,
+          callToActionLabel: campaign.callToActionLabel,
+          createdAt: new Date().toISOString(),
+          recipients: [campaign.recipient],
+          brand: campaign.brand,
+        });
+        sheet.getRange(rowNumber, 3).setValue('processed');
+        sheet.getRange(rowNumber, 14, 1, 2).setValues([[new Date(), JSON.stringify(result)]]);
+      } catch (error) {
+        sheet.getRange(rowNumber, 3).setValue('failed');
+        sheet.getRange(rowNumber, 14, 1, 2).setValues([[new Date(), error && error.message ? error.message : String(error)]]);
+      }
+
+      processed += 1;
+    }
+
+    if (hasPendingQueueRows_(sheet)) ensureQueueTrigger_();
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function campaignFromQueueRow_(row) {
+  return {
+    campaignId: String(row[1]),
+    subject: String(row[3]),
+    audience: String(row[4]),
+    senderName: String(row[5]),
+    fromEmail: String(row[6]),
+    replyTo: String(row[7]),
+    textBody: String(row[8]),
+    callToActionUrl: String(row[9]),
+    callToActionLabel: String(row[10]),
+    brand: JSON.parse(String(row[11])),
+    recipient: JSON.parse(String(row[12])),
+  };
+}
+
+function getQueueSheet_() {
+  return getSheet_(QUEUE_SHEET_NAME, [
+    'timestamp', 'campaignId', 'status', 'subject', 'audience', 'senderName', 'fromEmail', 'replyTo', 'textBody', 'callToActionUrl', 'callToActionLabel', 'brandJson', 'recipientJson', 'processedAt', 'message'
+  ]);
+}
+
+function ensureQueueTrigger_() {
+  const handler = 'processQueuedMarketingEmails';
+  const existing = ScriptApp.getProjectTriggers().some(function (trigger) {
+    return trigger.getHandlerFunction() === handler;
+  });
+  if (!existing) ScriptApp.newTrigger(handler).timeBased().after(60 * 1000).create();
+}
+
+function hasPendingQueueRows_(sheet) {
+  const values = sheet.getDataRange().getValues();
+  for (let i = 1; i < values.length; i++) {
+    if (String(values[i][2]) === 'pending') return true;
+  }
+  return false;
 }
 
 function processCampaign_(campaign) {
