@@ -4,6 +4,8 @@ export type PaymentAuditEmailResult =
   | { sent: true; recipientCount: number }
   | { sent: false; reason: string };
 
+export type OrderPaidEmailResult = PaymentAuditEmailResult;
+
 type EmailOrder = Record<string, unknown>;
 
 type Recipient = { email: string; name?: string };
@@ -62,6 +64,25 @@ function config() {
   };
 }
 
+function orderPaidBodyFor(order: EmailOrder, store: EmailOrder = {}) {
+  return `Hello ${storeName(order, store)},
+
+Sedifex has marked this order as paid. Please continue or complete the order in your store dashboard; do not wait for a separate Paystack email.
+
+Order ID: ${text(order.id ?? order.orderId ?? order.order_id, 'Unknown order')}
+Store: ${storeName(order, store)}
+Customer: ${customerName(order)}
+Amount: ${text(order.currency, 'GHS')} ${amount(order)}
+Payment status: paid
+Payment method: ${text(order.paymentMethod ?? order.payment_method ?? order.paymentCollectionMode ?? order.payment_collection_mode, 'unknown')}
+Source: ${sourceLabel(order)}
+Reference: ${paymentReferenceValue(order) || '—'}
+
+This email was sent by Sedifex Admin because Paystack notifications are not the source of truth for store fulfillment.
+
+Sedifex Admin`;
+}
+
 function bodyFor(order: EmailOrder, store: EmailOrder = {}) {
   return `Hello,
 
@@ -113,6 +134,44 @@ export async function sendPaymentNotConfirmedEmail(order: EmailOrder, store: Ema
       recipients,
       audience: 'payment_audit',
       source: 'sedifexadmin_payment_audit',
+      campaignOwner: 'sedifex',
+    }),
+  });
+
+  if (!response.ok) return { sent: false, reason: `email_http_${response.status}` };
+  return { sent: true, recipientCount: recipients.length };
+}
+
+
+export async function sendOrderPaidEmail(order: EmailOrder, store: EmailOrder = {}): Promise<OrderPaidEmailResult> {
+  if (order.storeOrderPaidEmailSent === true) return { sent: false, reason: 'already_sent' };
+  const settings = config();
+  if (!settings.webAppUrl || !settings.sharedToken) return { sent: false, reason: 'email_webhook_not_configured' };
+  const recipients = recipientList(order, store);
+  if (recipients.length === 0) return { sent: false, reason: 'no_recipients' };
+
+  const textBody = orderPaidBodyFor(order, store);
+  const response = await fetch(settings.webAppUrl, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'x-sedifex-shared-token': settings.sharedToken,
+    },
+    body: JSON.stringify({
+      action: 'sendSedifexMarketingEmail',
+      token: settings.sharedToken,
+      sharedToken: settings.sharedToken,
+      fromEmail: settings.fromEmail,
+      fromName: settings.fromName,
+      replyTo: settings.replyTo,
+      senderName: settings.fromName,
+      senderEmail: settings.fromEmail,
+      subject: 'Sedifex order paid: Complete this order',
+      text: textBody,
+      html: `<pre style="font-family:Arial,sans-serif;white-space:pre-wrap">${textBody.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')}</pre>`,
+      recipients,
+      audience: 'store_order_paid',
+      source: 'sedifexadmin_order_paid',
       campaignOwner: 'sedifex',
     }),
   });
