@@ -2,7 +2,7 @@ import { FieldValue, Timestamp } from 'firebase-admin/firestore';
 import { NextResponse } from 'next/server';
 import { adminFirestore } from '@/lib/firebase-admin';
 import { isPaymentConfirmed, paymentAuditPatch, isOnlineCheckoutOrder, isCashLikePayment } from '@/lib/payment-audit';
-import { sendPaymentNotConfirmedEmail } from '@/lib/payment-audit-email';
+import { sendOrderPaidEmail, sendPaymentNotConfirmedEmail } from '@/lib/payment-audit-email';
 import { classifyOrderWorkflow } from '@/lib/order-workflow';
 
 type StatusAction =
@@ -104,6 +104,16 @@ function emailSentPatch(reason: string) {
     paymentNotConfirmedEmailSentAt: now,
     paymentNotConfirmedEmailCount: FieldValue.increment(1),
     lastPaymentNotConfirmedEmailReason: reason,
+  };
+}
+
+function orderPaidEmailSentPatch(reason: string) {
+  const now = Timestamp.now();
+  return {
+    storeOrderPaidEmailSent: true,
+    storeOrderPaidEmailSentAt: now,
+    storeOrderPaidEmailCount: FieldValue.increment(1),
+    lastStoreOrderPaidEmailReason: reason,
   };
 }
 
@@ -385,6 +395,15 @@ export async function POST(req: Request) {
         if (emailResult.sent) emailPatch = emailSentPatch(`status_${action}`);
       } catch (emailError) {
         console.error('[integration-order-status] payment audit email failed', emailError);
+      }
+    }
+
+    if (action === 'confirm_payment' && orderData.storeOrderPaidEmailSent !== true) {
+      try {
+        const emailResult = await sendOrderPaidEmail({ ...orderData, ...patch, id: orderId }, storeData);
+        if (emailResult.sent) emailPatch = { ...emailPatch, ...orderPaidEmailSentPatch(`status_${action}`) };
+      } catch (emailError) {
+        console.error('[integration-order-status] order paid email failed', emailError);
       }
     }
 
