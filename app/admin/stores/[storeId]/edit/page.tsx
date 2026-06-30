@@ -51,6 +51,30 @@ function checked(formData: FormData, key: string) {
   return formData.get(key) === 'on';
 }
 
+function dateInputValue(value: unknown) {
+  if (!value) return '';
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) return '';
+    const isoDate = trimmed.match(/^\d{4}-\d{2}-\d{2}/)?.[0];
+    if (isoDate) return isoDate;
+  }
+  if (typeof value === 'number') {
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? '' : date.toISOString().slice(0, 10);
+  }
+  const seconds = asRecord(value).seconds;
+  if (typeof seconds === 'number') {
+    const date = new Date(seconds * 1000);
+    return Number.isNaN(date.getTime()) ? '' : date.toISOString().slice(0, 10);
+  }
+  return '';
+}
+
+function dateFormValue(formData: FormData, key: string) {
+  return optionalText(formText(formData, key));
+}
+
 async function loadStore(storeId: string) {
   const env = getFirebaseEnvStatus();
   if (!env.ready) return { error: 'Firebase environment variables are not ready.', profile: null, settings: null };
@@ -89,6 +113,17 @@ async function updateStore(formData: FormData) {
   const buyOptOut = checked(formData, 'buyOptOut');
   const status = formText(formData, 'status') || 'active';
   const paymentStatus = formText(formData, 'paymentStatus') || status;
+  const paymentProvider = formText(formData, 'paymentProvider');
+  const planKey = formText(formData, 'planKey');
+  const contractStatus = formText(formData, 'contractStatus');
+  const contractStart = dateFormValue(formData, 'contractStart');
+  const contractEnd = dateFormValue(formData, 'contractEnd');
+  const lastPaymentAt = dateFormValue(formData, 'lastPaymentAt');
+  const paystackCustomerCode = formText(formData, 'paystackCustomerCode');
+  const workspaceId = formText(formData, 'workspaceId');
+  const workspaceName = formText(formData, 'workspaceName');
+  const workspaceStatus = formText(formData, 'workspaceStatus');
+  const workspaceRole = formText(formData, 'workspaceRole');
 
   const profilePayload = {
     displayName,
@@ -118,6 +153,33 @@ async function updateStore(formData: FormData) {
     buyOptOut,
     status,
     paymentStatus,
+    paymentProvider: optionalText(paymentProvider),
+    contractStatus: optionalText(contractStatus),
+    contractStart,
+    contractEnd,
+    workspaceId: optionalText(workspaceId),
+    workspaceName: optionalText(workspaceName),
+    workspaceStatus: optionalText(workspaceStatus),
+    workspaceRole: optionalText(workspaceRole),
+    workspace: {
+      id: optionalText(workspaceId),
+      name: optionalText(workspaceName),
+      status: optionalText(workspaceStatus),
+      role: optionalText(workspaceRole),
+      updatedAt: now,
+    },
+    billing: {
+      provider: optionalText(paymentProvider),
+      planKey: optionalText(planKey),
+      contractStatus: optionalText(contractStatus),
+      contractStart,
+      currentPeriodStart: contractStart,
+      contractEnd,
+      currentPeriodEnd: contractEnd,
+      lastPaymentAt,
+      paystackCustomerCode: optionalText(paystackCustomerCode),
+      updatedAt: now,
+    },
     publicProfile: {
       displayName,
       publicEmail,
@@ -168,6 +230,33 @@ async function updateStore(formData: FormData) {
     buyOptOut,
     status,
     paymentStatus,
+    paymentProvider: optionalText(paymentProvider),
+    contractStatus: optionalText(contractStatus),
+    contractStart,
+    contractEnd,
+    workspaceId: optionalText(workspaceId),
+    workspaceName: optionalText(workspaceName),
+    workspaceStatus: optionalText(workspaceStatus),
+    workspaceRole: optionalText(workspaceRole),
+    workspace: {
+      id: optionalText(workspaceId),
+      name: optionalText(workspaceName),
+      status: optionalText(workspaceStatus),
+      role: optionalText(workspaceRole),
+      updatedAt: now,
+    },
+    billing: {
+      provider: optionalText(paymentProvider),
+      planKey: optionalText(planKey),
+      contractStatus: optionalText(contractStatus),
+      contractStart,
+      currentPeriodStart: contractStart,
+      contractEnd,
+      currentPeriodEnd: contractEnd,
+      lastPaymentAt,
+      paystackCustomerCode: optionalText(paystackCustomerCode),
+      updatedAt: now,
+    },
     updatedAt: now,
     adminUpdatedAt: now,
     adminUpdatedFrom: 'sedifexadmin-store-edit',
@@ -279,7 +368,6 @@ export default async function EditStorePage({ params }: { params: Params }) {
             <Field label="TikTok handle" name="tiktokHandle" defaultValue={fieldText(identity, ['tiktokHandle', 'tiktokUrl'], nestedText(identity, ['publicProfile', 'tiktokHandle']))} placeholder="glitteringmedspa" />
             <Field label="WhatsApp number" name="whatsappNumber" defaultValue={fieldText(identity, ['whatsappNumber'], nestedText(identity, ['publicProfile', 'whatsappNumber']))} placeholder="0270000000" />
             <SelectField label="Store status" name="status" defaultValue={fieldText(identity, ['status'], 'active')} options={['active', 'inactive', 'pending', 'suspended']} />
-            <SelectField label="Payment status" name="paymentStatus" defaultValue={fieldText(identity, ['paymentStatus'], 'active')} options={['active', 'inactive', 'pending', 'past_due', 'cancelled']} />
           </div>
 
           <div className="mt-5 grid gap-3 md:grid-cols-2">
@@ -291,6 +379,28 @@ export default async function EditStorePage({ params }: { params: Params }) {
               <input type="checkbox" name="buyOptOut" defaultChecked={identity.buyOptOut === true} className="mt-1 h-4 w-4 accent-indigo-600" />
               <span><span className="block font-semibold text-slate-950">Opt out from Buy</span><span className="mt-1 block text-slate-500">Use this if the store should not be promoted for online marketplace checkout.</span></span>
             </label>
+          </div>
+        </SectionCard>
+
+        <SectionCard title="Payment details">
+          <div className="grid gap-5 md:grid-cols-2">
+            <SelectField label="Payment status" name="paymentStatus" defaultValue={fieldText(identity, ['paymentStatus'], 'active')} options={['active', 'inactive', 'pending', 'past_due', 'cancelled']} />
+            <Field label="Payment provider" name="paymentProvider" defaultValue={fieldText(identity, ['paymentProvider'], nestedText(identity, ['billing', 'provider']))} placeholder="paystack" />
+            <Field label="Plan key" name="planKey" defaultValue={nestedText(identity, ['billing', 'planKey'], fieldText(identity, ['planKey']))} placeholder="growth" />
+            <SelectField label="Contract status" name="contractStatus" defaultValue={fieldText(identity, ['contractStatus'], nestedText(identity, ['billing', 'contractStatus'], 'active'))} options={['active', 'trialing', 'pending', 'past_due', 'ended', 'cancelled']} />
+            <Field label="Contract start" name="contractStart" type="date" defaultValue={dateInputValue(identity.contractStart || asRecord(identity.billing).contractStart || asRecord(identity.billing).currentPeriodStart)} />
+            <Field label="Contract end" name="contractEnd" type="date" defaultValue={dateInputValue(identity.contractEnd || asRecord(identity.billing).contractEnd || asRecord(identity.billing).currentPeriodEnd)} />
+            <Field label="Last payment date" name="lastPaymentAt" type="date" defaultValue={dateInputValue(asRecord(identity.billing).lastPaymentAt || identity.lastPaymentAt)} />
+            <Field label="Paystack customer code" name="paystackCustomerCode" defaultValue={nestedText(identity, ['billing', 'paystackCustomerCode'], fieldText(identity, ['paystackCustomerCode']))} placeholder="CUS_xxxxx" />
+          </div>
+        </SectionCard>
+
+        <SectionCard title="Workspace">
+          <div className="grid gap-5 md:grid-cols-2">
+            <Field label="Workspace ID" name="workspaceId" defaultValue={fieldText(identity, ['workspaceId'], nestedText(identity, ['workspace', 'id']))} placeholder="workspace_123" />
+            <Field label="Workspace name" name="workspaceName" defaultValue={fieldText(identity, ['workspaceName'], nestedText(identity, ['workspace', 'name']))} placeholder="Glittering Spa HQ" />
+            <SelectField label="Workspace status" name="workspaceStatus" defaultValue={fieldText(identity, ['workspaceStatus'], nestedText(identity, ['workspace', 'status'], 'active'))} options={['active', 'inactive', 'pending', 'suspended']} />
+            <Field label="Workspace role" name="workspaceRole" defaultValue={fieldText(identity, ['workspaceRole'], nestedText(identity, ['workspace', 'role']))} placeholder="owner" />
           </div>
         </SectionCard>
 
