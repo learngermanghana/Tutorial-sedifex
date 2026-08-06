@@ -117,14 +117,7 @@ function recordTime(record: RecordDoc) {
 
 function storeId(record: RecordDoc, moduleId: string) {
   const direct = field(record, [
-    'storeId',
-    'store_id',
-    'merchantId',
-    'merchant_id',
-    'businessId',
-    'business_id',
-    'workspaceId',
-    'sellerId',
+    'storeId', 'store_id', 'merchantId', 'merchant_id', 'businessId', 'business_id', 'workspaceId', 'sellerId',
   ]);
   if (direct) return direct;
   const metadata = asRecord(record.metadata);
@@ -140,11 +133,8 @@ function firstItem(record: RecordDoc) {
 
 function itemName(record: RecordDoc) {
   const item = firstItem(record);
-  return (
-    field(record, ['itemName', 'productName', 'serviceName', 'courseName', 'name', 'title']) ||
-    text(item?.name ?? item?.productName ?? item?.itemName ?? item?.serviceName) ||
-    'Item'
-  );
+  return field(record, ['itemName', 'productName', 'serviceName', 'courseName', 'name', 'title']) ||
+    text(item?.name ?? item?.productName ?? item?.itemName ?? item?.serviceName) || 'Item';
 }
 
 function customerName(record: RecordDoc) {
@@ -153,34 +143,26 @@ function customerName(record: RecordDoc) {
 }
 
 function statusText(record: RecordDoc) {
-  return [
-    record.paymentStatus,
-    record.payment_status,
-    record.bookingStatus,
-    record.booking_status,
-    record.orderStatus,
-    record.order_status,
-    record.fulfillmentStatus,
-    record.deliveryStatus,
-    record.status,
-  ]
-    .map((value) => text(value).toLowerCase())
-    .filter(Boolean)
-    .join(' ');
+  return [record.paymentStatus, record.payment_status, record.bookingStatus, record.booking_status, record.orderStatus,
+    record.order_status, record.fulfillmentStatus, record.deliveryStatus, record.status]
+    .map((value) => text(value).toLowerCase()).filter(Boolean).join(' ');
 }
 
 function amount(record: RecordDoc) {
   const payment = asRecord(record.payment);
-  const minor = record.amountMinor ?? record.amount_minor ?? payment?.amountMinor;
+  const minor = record.amountMinor ?? record.amount_minor ?? payment?.amountMinor ?? payment?.amount_minor;
   if (typeof minor === 'number' && Number.isFinite(minor)) return minor / 100;
   const candidates = [
     payment?.customerTotal,
     payment?.amount,
     record.customerTotal,
     record.finalTotal,
+    record.final_total,
     record.amountPaid,
+    record.amount_paid,
     record.confirmedAmount,
     record.totalAmount,
+    record.total_amount,
     record.grandTotal,
     record.total,
     record.amount,
@@ -209,13 +191,7 @@ function age(value: number | null) {
 
 function date(value: number | null) {
   if (!value) return 'No activity yet';
-  return new Intl.DateTimeFormat('en', {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  }).format(new Date(value));
+  return new Intl.DateTimeFormat('en', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' }).format(new Date(value));
 }
 
 function normalized(value: string) {
@@ -226,20 +202,13 @@ function orderKind(record: RecordDoc) {
   const metadata = asRecord(record.metadata);
   const item = firstItem(record);
   const combined = [
-    record.recordType,
-    record.orderType,
-    record.itemType,
-    record.sourceLabel,
-    record.sourceChannel,
-    metadata?.quickPayType,
-    metadata?.accountingType,
-    item?.type,
-    item?.itemType,
-  ]
-    .map((value) => text(value).toLowerCase())
-    .join(' ');
+    record.recordType, record.orderType, record.order_type, record.itemType, record.item_type,
+    record.sourceLabel, record.sourceChannel, record.source, metadata?.quickPayType, metadata?.accountingType,
+    item?.type, item?.itemType, item?.item_type,
+  ].map((value) => text(value).toLowerCase()).join(' ');
   if (/booking|appointment/.test(combined)) return 'booking';
   if (/service|course|donation|registration/.test(combined)) return 'service';
+  if (/store.?only|manual|cash|quick.?pay.?cash/.test(combined)) return 'manual';
   return 'product';
 }
 
@@ -259,25 +228,18 @@ function eventFor(record: RecordDoc, moduleId: string, moduleLabel: string, owne
     const name = customerName(record);
     tone = /failed|cancelled|declined/.test(status) ? 'red' : paid(record) ? 'green' : 'blue';
     if (/failed|cancelled|declined/.test(status)) action = 'Payment or order failed';
-    else if (/delivered|completed/.test(status)) action = kind === 'booking' ? 'Completed booking' : kind === 'service' ? 'Completed service sale' : 'Completed product sale';
-    else if (paid(record)) action = kind === 'booking' ? 'Received booking payment' : kind === 'service' ? 'Received service payment' : 'Completed product sale';
-    else action = kind === 'booking' ? 'Created booking order' : kind === 'service' ? 'Created service order' : 'Created product order';
+    else if (/delivered|completed/.test(status)) action = kind === 'booking' ? 'Completed booking' : kind === 'service' ? 'Completed service sale' : kind === 'manual' ? 'Completed cash sale' : 'Completed product sale';
+    else if (paid(record)) action = kind === 'booking' ? 'Received booking payment' : kind === 'service' ? 'Received service payment' : kind === 'manual' ? 'Recorded cash sale' : 'Completed product sale';
+    else action = kind === 'booking' ? 'Created booking order' : kind === 'service' ? 'Created service order' : kind === 'manual' ? 'Created manual sale' : 'Created product order';
     description = `${name} ${paid(record) ? 'paid for' : 'started'} ${subject}${total ? ` · ${money(total)}` : ''}.`;
     href = '/admin/orders';
   } else if (moduleId === 'bookings') {
     tone = /failed|cancelled|declined/.test(status) ? 'red' : /completed|confirmed|paid|success/.test(status) ? 'green' : 'blue';
-    action = /completed/.test(status)
-      ? 'Completed website booking'
-      : /confirmed|paid|success/.test(status)
-        ? 'Confirmed website booking'
-        : /failed|cancelled|declined/.test(status)
-          ? 'Booking payment failed'
-          : 'Created website booking';
+    action = /completed/.test(status) ? 'Completed website booking' : /confirmed|paid|success/.test(status) ? 'Confirmed website booking' : /failed|cancelled|declined/.test(status) ? 'Booking payment failed' : 'Created website booking';
     description = `${customerName(record)} booked ${subject}${total ? ` · ${money(total)}` : ''}.`;
     href = '/admin/orders';
   } else if (moduleId === 'customers') {
-    action = 'Saved customer';
-    tone = 'blue';
+    action = 'Saved customer'; tone = 'blue';
     description = `${customerName(record)} was saved to the customer list.`;
     href = '/admin/customers';
   } else if (moduleId === 'products' || moduleId === 'publicProducts') {
@@ -285,21 +247,14 @@ function eventFor(record: RecordDoc, moduleId: string, moduleLabel: string, owne
     description = `${subject} changed in the ${moduleId === 'publicProducts' ? 'public catalog' : 'store catalog'}.`;
     href = '/admin/products';
   } else if (moduleId === 'publicListings' || moduleId === 'catalogItems') {
-    action = 'Updated marketplace listing';
-    description = `${subject} changed in marketplace records.`;
-    href = '/admin/products';
+    action = 'Updated marketplace listing'; description = `${subject} changed in marketplace records.`; href = '/admin/products';
   } else if (moduleId === 'services' || moduleId === 'courses') {
-    action = moduleId === 'services' ? 'Updated service' : 'Updated course';
-    description = `${subject} changed in the catalog.`;
-    href = '/admin/products';
+    action = moduleId === 'services' ? 'Updated service' : 'Updated course'; description = `${subject} changed in the catalog.`; href = '/admin/products';
   } else if (moduleId === 'storeProfiles') {
-    action = 'Updated store profile';
-    tone = 'yellow';
+    action = 'Updated store profile'; tone = 'yellow';
     description = `${field(record, ['displayName', 'storeName', 'name', 'businessName'], ownerId)} profile is available in Sedifex.`;
   } else if (moduleId === 'storeSettings') {
-    action = 'Updated store settings';
-    tone = 'yellow';
-    description = 'Store settings were changed.';
+    action = 'Updated store settings'; tone = 'yellow'; description = 'Store settings were changed.';
   } else if (moduleId === 'webhookDeliveries') {
     const deliveryStatus = field(record, ['status', 'result', 'deliveryStatus']).toLowerCase();
     tone = /fail|error|retry/.test(deliveryStatus) ? 'red' : 'green';
@@ -314,54 +269,25 @@ function eventFor(record: RecordDoc, moduleId: string, moduleLabel: string, owne
     href = '/admin/analytics';
   }
 
-  return {
-    id: `${moduleId}-${ownerId}-${recordId}`,
-    storeId: ownerId,
-    moduleId,
-    moduleLabel,
-    action,
-    description,
-    recordId,
-    subject,
-    amount: total,
-    at,
-    href,
-    tone,
-  };
+  return { id: `${moduleId}-${ownerId}-${recordId}`, storeId: ownerId, moduleId, moduleLabel, action, description, recordId, subject, amount: total, at, href, tone };
 }
 
-function isTransaction(event: ActivityEvent) {
-  return event.moduleId === 'orders' || event.moduleId === 'bookings';
-}
-
-function isCatalogNoise(event: ActivityEvent) {
-  return ['products', 'publicProducts', 'publicListings', 'catalogItems'].includes(event.moduleId);
-}
+function isTransaction(event: ActivityEvent) { return event.moduleId === 'orders' || event.moduleId === 'bookings'; }
+function isCatalogNoise(event: ActivityEvent) { return ['products', 'publicProducts', 'publicListings', 'catalogItems'].includes(event.moduleId); }
 
 function refineEvents(events: ActivityEvent[]) {
   const sorted = [...events].sort((a, b) => (b.at || 0) - (a.at || 0));
   const kept: ActivityEvent[] = [];
-
   for (const event of sorted) {
     if (isCatalogNoise(event)) {
       const subject = normalized(event.subject);
-      const linkedSale = sorted.find((candidate) => {
-        if (!isTransaction(candidate) || !event.at || !candidate.at) return false;
-        const closeInTime = Math.abs(candidate.at - event.at) <= 3 * 60_000;
-        const sameSubject = subject && normalized(candidate.subject) === subject;
-        return closeInTime && sameSubject;
-      });
+      const linkedSale = sorted.find((candidate) => isTransaction(candidate) && Boolean(event.at) && Boolean(candidate.at) && Math.abs((candidate.at || 0) - (event.at || 0)) <= 3 * 60_000 && Boolean(subject) && normalized(candidate.subject) === subject);
       if (linkedSale) continue;
-
-      const duplicateCatalogWrite = kept.some((candidate) => {
-        if (!isCatalogNoise(candidate) || !event.at || !candidate.at) return false;
-        return normalized(candidate.subject) === subject && Math.abs(candidate.at - event.at) <= 2 * 60_000;
-      });
-      if (duplicateCatalogWrite) continue;
+      const duplicate = kept.some((candidate) => isCatalogNoise(candidate) && Boolean(event.at) && Boolean(candidate.at) && normalized(candidate.subject) === subject && Math.abs((candidate.at || 0) - (event.at || 0)) <= 2 * 60_000);
+      if (duplicate) continue;
     }
     kept.push(event);
   }
-
   return kept;
 }
 
@@ -377,13 +303,11 @@ async function safeRead(collection: string) {
 async function loadData() {
   const env = getFirebaseEnvStatus();
   if (!env.ready) return { error: 'Firebase environment variables are not ready.', stores: [] as StoreActivityRow[], events: [] as ActivityEvent[] };
-
   const results = await Promise.all(COLLECTIONS.map((config) => safeRead(config.collection)));
   const profiles = new Map<string, RecordDoc>();
   const rawEvents = new Map<string, ActivityEvent[]>();
   const counts = new Map<string, number>();
   const revenue = new Map<string, number>();
-
   COLLECTIONS.forEach((config, index) => {
     results[index].documents.forEach((record) => {
       const ownerId = storeId(record, config.id);
@@ -396,121 +320,42 @@ async function loadData() {
       if (config.amount) revenue.set(ownerId, (revenue.get(ownerId) || 0) + event.amount);
     });
   });
-
   const ids = new Set([...profiles.keys(), ...rawEvents.keys()]);
-  const stores = [...ids]
-    .map((id) => {
-      const profile = profiles.get(id) || { id };
-      const recentEvents = refineEvents(rawEvents.get(id) || []);
-      const lastAt = recentEvents[0]?.at || recordTime(profile);
-      const days = lastAt ? (Date.now() - lastAt) / 86_400_000 : Infinity;
-      const status: StoreActivityRow['status'] = !lastAt ? 'empty' : days <= 2 ? 'active' : days <= 14 ? 'warm' : 'quiet';
-      return {
-        id,
-        name: field(profile, ['displayName', 'storeName', 'name', 'businessName'], id),
-        contact: field(profile, ['publicEmail', 'email', 'ownerEmail', 'contactEmail'], 'Not set'),
-        phone: field(profile, ['publicPhone', 'phone', 'phoneNumber', 'contactPhone'], 'Not set'),
-        status,
-        lastAt,
-        totalRecords: counts.get(id) || 0,
-        revenue: revenue.get(id) || 0,
-        recentEvents,
-      } satisfies StoreActivityRow;
-    })
-    .sort((a, b) => (b.lastAt || 0) - (a.lastAt || 0));
-
-  return {
-    error: results.find((result) => result.error)?.error || null,
-    stores,
-    events: stores.flatMap((store) => store.recentEvents.map((event) => ({ ...event, description: `${store.name}: ${event.description}` }))).sort((a, b) => (b.at || 0) - (a.at || 0)),
-  };
+  const stores = [...ids].map((id) => {
+    const profile = profiles.get(id) || { id };
+    const recentEvents = refineEvents(rawEvents.get(id) || []);
+    const lastAt = recentEvents[0]?.at || recordTime(profile);
+    const days = lastAt ? (Date.now() - lastAt) / 86_400_000 : Infinity;
+    const status: StoreActivityRow['status'] = !lastAt ? 'empty' : days <= 2 ? 'active' : days <= 14 ? 'warm' : 'quiet';
+    return { id, name: field(profile, ['displayName', 'storeName', 'name', 'businessName'], id), contact: field(profile, ['publicEmail', 'email', 'ownerEmail', 'contactEmail'], 'Not set'), phone: field(profile, ['publicPhone', 'phone', 'phoneNumber', 'contactPhone'], 'Not set'), status, lastAt, totalRecords: counts.get(id) || 0, revenue: revenue.get(id) || 0, recentEvents } satisfies StoreActivityRow;
+  }).sort((a, b) => (b.lastAt || 0) - (a.lastAt || 0));
+  return { error: results.find((result) => result.error)?.error || null, stores, events: stores.flatMap((store) => store.recentEvents.map((event) => ({ ...event, description: `${store.name}: ${event.description}` }))).sort((a, b) => (b.at || 0) - (a.at || 0)) };
 }
 
 function badgeTone(status: StoreActivityRow['status']): 'green' | 'yellow' | 'red' | 'slate' {
-  if (status === 'active') return 'green';
-  if (status === 'warm') return 'yellow';
-  if (status === 'quiet') return 'red';
-  return 'slate';
+  if (status === 'active') return 'green'; if (status === 'warm') return 'yellow'; if (status === 'quiet') return 'red'; return 'slate';
 }
 
 export default async function StoreActivityPage({ searchParams }: { searchParams: SearchParams }) {
   const params = await searchParams;
   const query = (params.q || '').trim().toLowerCase();
   const data = await loadData();
-  const stores = query
-    ? data.stores.filter((store) => [store.name, store.id, store.contact, store.phone, ...store.recentEvents.map((event) => `${event.action} ${event.description}`)].join(' ').toLowerCase().includes(query))
-    : data.stores;
+  const stores = query ? data.stores.filter((store) => [store.name, store.id, store.contact, store.phone, ...store.recentEvents.map((event) => `${event.action} ${event.description}`)].join(' ').toLowerCase().includes(query)) : data.stores;
   const active = data.stores.filter((store) => store.status === 'active' || store.status === 'warm').length;
   const totalRevenue = data.stores.reduce((sum, store) => sum + store.revenue, 0);
   const totalRecords = data.stores.reduce((sum, store) => sum + store.totalRecords, 0);
-
-  return (
-    <div className="space-y-6">
-      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard label="Stores tracked" value={String(data.stores.length)} delta={`${active} active or warm`} />
-        <StatCard label="Business actions" value={String(data.events.length)} delta="Sales, bookings, customers and real edits" />
-        <StatCard label="Tracked revenue" value={money(totalRevenue)} delta="Paid order and booking records" />
-        <StatCard label="Raw records" value={String(totalRecords)} delta="Before duplicate and sync-noise cleanup" />
-      </section>
-
-      {data.error ? (
-        <section className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
-          <div className="flex gap-3"><AlertTriangle className="h-5 w-5" /><p>{data.error}</p></div>
-        </section>
-      ) : null}
-
-      <section className="grid gap-6 xl:grid-cols-[1.8fr_0.8fr]">
-        <SectionCard title="What each store actually did" action={<Link href="/admin/orders" className="inline-flex items-center gap-1 text-xs font-semibold text-indigo-600">Open orders <ArrowUpRight className="h-3.5 w-3.5" /></Link>}>
-          <form className="mb-4 flex flex-col gap-3 sm:flex-row" action="/admin/store-activity">
-            <label className="relative flex-1">
-              <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-              <input name="q" defaultValue={params.q || ''} placeholder="Search store, sale, booking, customer or product" className="w-full rounded-2xl border border-slate-200 bg-white py-3 pl-11 pr-4 text-sm outline-none focus:border-indigo-300 focus:ring-4 focus:ring-indigo-100" />
-            </label>
-            <button className="rounded-2xl bg-slate-950 px-5 py-3 text-sm font-bold text-white">Search</button>
-          </form>
-
-          <div className="divide-y divide-slate-200 overflow-hidden rounded-2xl border border-slate-200">
-            {stores.length === 0 ? <div className="p-8 text-center text-sm text-slate-500">No store activity matches this search.</div> : stores.map((store) => (
-              <div key={store.id} className="grid gap-4 p-4 xl:grid-cols-[1fr_0.5fr_0.7fr_1.6fr_0.55fr]">
-                <Link href={`/admin/stores/${encodeURIComponent(store.id)}`} className="flex min-w-0 gap-3">
-                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-indigo-50 text-indigo-600"><Store className="h-4 w-4" /></span>
-                  <div className="min-w-0"><p className="truncate font-semibold text-slate-950">{store.name}</p><p className="truncate text-xs text-slate-500">{store.contact} · {store.phone}</p><p className="truncate text-xs text-slate-400">{store.id}</p></div>
-                </Link>
-                <div><StatusBadge tone={badgeTone(store.status)}>{store.status === 'empty' ? 'No activity' : store.status}</StatusBadge></div>
-                <div><p className="font-medium text-slate-900">{age(store.lastAt)}</p><p className="text-xs text-slate-500">{date(store.lastAt)}</p><p className="mt-1 text-xs text-slate-400">{store.totalRecords} raw records</p></div>
-                <div className="space-y-2">
-                  {store.recentEvents.slice(0, 5).map((event) => (
-                    <Link key={event.id} href={event.href} className="block rounded-2xl bg-slate-50 p-3 hover:bg-slate-100">
-                      <div className="flex items-start justify-between gap-2"><p className="font-semibold text-slate-900">{event.action}</p><StatusBadge tone={event.tone}>{age(event.at)}</StatusBadge></div>
-                      <p className="mt-1 text-xs leading-5 text-slate-600">{event.description}</p>
-                      <p className="mt-1 text-[11px] text-slate-400">{event.moduleLabel} · {event.recordId}</p>
-                    </Link>
-                  ))}
-                  {store.recentEvents.length > 5 ? <p className="text-xs text-slate-500">+{store.recentEvents.length - 5} more business actions</p> : null}
-                </div>
-                <div className="font-semibold text-slate-950">{money(store.revenue)}</div>
-              </div>
-            ))}
-          </div>
-        </SectionCard>
-
-        <div className="space-y-6">
-          <SectionCard title="Latest business actions">
-            <div className="space-y-3">
-              {data.events.slice(0, 12).map((event) => (
-                <Link key={event.id} href={event.href} className="block rounded-2xl bg-slate-50 p-4 text-sm hover:bg-slate-100">
-                  <div className="flex items-start justify-between gap-3"><div><p className="font-semibold text-slate-950">{event.action}</p><p className="mt-1 text-xs leading-5 text-slate-600">{event.description}</p></div><StatusBadge tone={event.tone}>{age(event.at)}</StatusBadge></div>
-                  <p className="mt-2 flex items-center gap-1 text-[11px] text-slate-400"><Clock3 className="h-3 w-3" /> {date(event.at)}</p>
-                </Link>
-              ))}
-            </div>
-          </SectionCard>
-
-          <SectionCard title="How activity is classified">
-            <div className="flex gap-3 rounded-2xl bg-indigo-50 p-4 text-sm text-indigo-900"><Activity className="h-5 w-5 shrink-0" /><p>Paid orders and confirmed bookings are shown as sales or booking actions. Product and public-catalog writes at the same time for the same item are treated as inventory sync and hidden, while genuine standalone catalog edits remain visible.</p></div>
-          </SectionCard>
-        </div>
-      </section>
-    </div>
-  );
+  return <div className="space-y-6">
+    <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4"><StatCard label="Stores tracked" value={String(data.stores.length)} delta={`${active} active or warm`} /><StatCard label="Business actions" value={String(data.events.length)} delta="Sales, bookings, customers and real edits" /><StatCard label="Tracked revenue" value={money(totalRevenue)} delta="Paid order and booking records" /><StatCard label="Raw records" value={String(totalRecords)} delta="Before duplicate and sync-noise cleanup" /></section>
+    {data.error ? <section className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800"><div className="flex gap-3"><AlertTriangle className="h-5 w-5" /><p>{data.error}</p></div></section> : null}
+    <section className="grid gap-6 xl:grid-cols-[1.8fr_0.8fr]">
+      <SectionCard title="What each store actually did" action={<Link href="/admin/orders" className="inline-flex items-center gap-1 text-xs font-semibold text-indigo-600">Open orders <ArrowUpRight className="h-3.5 w-3.5" /></Link>}>
+        <form className="mb-4 flex flex-col gap-3 sm:flex-row" action="/admin/store-activity"><label className="relative flex-1"><Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" /><input name="q" defaultValue={params.q || ''} placeholder="Search store, sale, booking, customer or product" className="w-full rounded-2xl border border-slate-200 bg-white py-3 pl-11 pr-4 text-sm outline-none focus:border-indigo-300 focus:ring-4 focus:ring-indigo-100" /></label><button className="rounded-2xl bg-slate-950 px-5 py-3 text-sm font-bold text-white">Search</button></form>
+        <div className="divide-y divide-slate-200 overflow-hidden rounded-2xl border border-slate-200">{stores.length === 0 ? <div className="p-8 text-center text-sm text-slate-500">No store activity matches this search.</div> : stores.map((store) => <div key={store.id} className="grid gap-4 p-4 xl:grid-cols-[1fr_0.5fr_0.7fr_1.6fr_0.55fr]">
+          <Link href={`/admin/stores/${encodeURIComponent(store.id)}`} className="flex min-w-0 gap-3"><span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-indigo-50 text-indigo-600"><Store className="h-4 w-4" /></span><div className="min-w-0"><p className="truncate font-semibold text-slate-950">{store.name}</p><p className="truncate text-xs text-slate-500">{store.contact} · {store.phone}</p><p className="truncate text-xs text-slate-400">{store.id}</p></div></Link>
+          <div><StatusBadge tone={badgeTone(store.status)}>{store.status === 'empty' ? 'No activity' : store.status}</StatusBadge></div><div><p className="font-medium text-slate-900">{age(store.lastAt)}</p><p className="text-xs text-slate-500">{date(store.lastAt)}</p><p className="mt-1 text-xs text-slate-400">{store.totalRecords} raw records</p></div>
+          <div className="space-y-2">{store.recentEvents.slice(0, 5).map((event) => <Link key={event.id} href={event.href} className="block rounded-2xl bg-slate-50 p-3 hover:bg-slate-100"><div className="flex items-start justify-between gap-2"><p className="font-semibold text-slate-900">{event.action}</p><StatusBadge tone={event.tone}>{age(event.at)}</StatusBadge></div><p className="mt-1 text-xs leading-5 text-slate-600">{event.description}</p><p className="mt-1 text-[11px] text-slate-400">{event.moduleLabel} · {event.recordId}</p></Link>)}{store.recentEvents.length > 5 ? <p className="text-xs text-slate-500">+{store.recentEvents.length - 5} more business actions</p> : null}</div><div className="font-semibold text-slate-950">{money(store.revenue)}</div></div>)}</div>
+      </SectionCard>
+      <div className="space-y-6"><SectionCard title="Latest business actions"><div className="space-y-3">{data.events.slice(0, 12).map((event) => <Link key={event.id} href={event.href} className="block rounded-2xl bg-slate-50 p-4 text-sm hover:bg-slate-100"><div className="flex items-start justify-between gap-3"><div><p className="font-semibold text-slate-950">{event.action}</p><p className="mt-1 text-xs leading-5 text-slate-600">{event.description}</p></div><StatusBadge tone={event.tone}>{age(event.at)}</StatusBadge></div><p className="mt-2 flex items-center gap-1 text-[11px] text-slate-400"><Clock3 className="h-3 w-3" /> {date(event.at)}</p></Link>)}</div></SectionCard><SectionCard title="How activity is classified"><div className="flex gap-3 rounded-2xl bg-indigo-50 p-4 text-sm text-indigo-900"><Activity className="h-5 w-5 shrink-0" /><p>Paid orders and confirmed bookings are shown as sales or booking actions. Product and public-catalog writes at the same time for the same item are treated as inventory sync and hidden, while genuine standalone catalog edits remain visible.</p></div></SectionCard></div>
+    </section>
+  </div>;
 }
