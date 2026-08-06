@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { Activity, AlertTriangle, ArrowUpRight, Clock3, Package, Search, ShoppingBag, Store, Users } from 'lucide-react';
+import { Activity, AlertTriangle, ArrowUpRight, Clock3, Search, Store } from 'lucide-react';
 import { SectionCard, StatCard, StatusBadge } from '../../../components/admin/ui';
 import { getFirebaseEnvStatus, listFirestoreDocuments } from '../../../lib/firebase-admin';
 
@@ -7,14 +7,11 @@ export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
 type SearchParams = Promise<{ q?: string }>;
-type RecordDoc = Record<string, unknown> & { id?: string; path?: string; updateTime?: string | null; createTime?: string | null };
-
-type ModuleStat = {
-  id: string;
-  label: string;
-  count: number;
-  amount: number;
-  lastAt: number | null;
+type RecordDoc = Record<string, unknown> & {
+  id?: string;
+  path?: string;
+  updateTime?: string | null;
+  createTime?: string | null;
 };
 
 type ActivityEvent = {
@@ -25,6 +22,7 @@ type ActivityEvent = {
   action: string;
   description: string;
   recordId: string;
+  subject: string;
   amount: number;
   at: number | null;
   href: string;
@@ -36,33 +34,22 @@ type StoreActivityRow = {
   name: string;
   contact: string;
   phone: string;
-  location: string;
   status: 'active' | 'warm' | 'quiet' | 'empty';
   lastAt: number | null;
   totalRecords: number;
   revenue: number;
-  modules: ModuleStat[];
-  activeModules: string[];
   recentEvents: ActivityEvent[];
 };
 
-type ActivityData = {
-  ok: boolean;
-  error: string | null;
-  stores: StoreActivityRow[];
-  events: ActivityEvent[];
-  collectionErrors: Record<string, string>;
-};
-
-const ACTIVITY_COLLECTIONS = [
+const COLLECTIONS = [
   { id: 'storeProfiles', label: 'Store profile', collection: 'stores', amount: false },
   { id: 'storeSettings', label: 'Store settings', collection: 'storeSettings', amount: false },
-  { id: 'orders', label: 'Online / Quick Pay orders', collection: 'integrationOrders', amount: true },
+  { id: 'orders', label: 'Orders / sales', collection: 'integrationOrders', amount: true },
   { id: 'bookings', label: 'Website bookings', collection: 'integrationBookings', amount: true },
   { id: 'customers', label: 'Customers', collection: 'customers', amount: false },
-  { id: 'publicListings', label: 'Marketplace listings', collection: 'publicListings', amount: false },
-  { id: 'publicProducts', label: 'Public products', collection: 'publicProducts', amount: false },
   { id: 'products', label: 'Products', collection: 'products', amount: false },
+  { id: 'publicProducts', label: 'Public products', collection: 'publicProducts', amount: false },
+  { id: 'publicListings', label: 'Marketplace listings', collection: 'publicListings', amount: false },
   { id: 'services', label: 'Services', collection: 'services', amount: false },
   { id: 'courses', label: 'Courses', collection: 'courses', amount: false },
   { id: 'catalogItems', label: 'Catalog items', collection: 'catalogItems', amount: false },
@@ -71,656 +58,456 @@ const ACTIVITY_COLLECTIONS = [
 ] as const;
 
 function asRecord(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
 }
 
-function valueText(value: unknown, fallback = '') {
+function text(value: unknown, fallback = '') {
   if (typeof value === 'string') return value.trim() || fallback;
   if (typeof value === 'number' && Number.isFinite(value)) return String(value);
   return fallback;
 }
 
-function fieldText(record: RecordDoc | null | undefined, fields: string[], fallback = '') {
+function field(record: RecordDoc | null | undefined, keys: string[], fallback = '') {
   if (!record) return fallback;
-  for (const field of fields) {
-    const text = valueText(record[field], '');
-    if (text) return text;
+  for (const key of keys) {
+    const value = text(record[key]);
+    if (value) return value;
   }
   return fallback;
 }
 
-function nestedValue(record: RecordDoc | null | undefined, path: string[]) {
-  let current: unknown = record;
-  for (const key of path) {
-    const currentObject = asRecord(current);
-    if (!currentObject) return undefined;
-    current = currentObject[key];
-  }
-  return current;
-}
-
-function nestedText(record: RecordDoc | null | undefined, paths: string[][], fallback = '') {
-  for (const path of paths) {
-    const text = valueText(nestedValue(record, path), '');
-    if (text) return text;
-  }
-  return fallback;
-}
-
-function timestampToMillis(value: unknown): number | null {
+function millis(value: unknown): number | null {
   if (!value) return null;
   if (typeof value === 'number') return Number.isFinite(value) ? value : null;
   if (typeof value === 'string') {
     const parsed = Date.parse(value);
     return Number.isNaN(parsed) ? null : parsed;
   }
-  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value.getTime();
-
+  if (value instanceof Date) return value.getTime();
   if (typeof value === 'object') {
-    const candidate = value as { seconds?: unknown; _seconds?: unknown; toMillis?: unknown };
-    if (typeof candidate.toMillis === 'function') {
-      const millis = candidate.toMillis();
-      return typeof millis === 'number' && Number.isFinite(millis) ? millis : null;
-    }
-    const seconds = typeof candidate.seconds === 'number' ? candidate.seconds : typeof candidate._seconds === 'number' ? candidate._seconds : null;
-    return seconds !== null ? seconds * 1000 : null;
+    const candidate = value as { seconds?: unknown; _seconds?: unknown };
+    const seconds =
+      typeof candidate.seconds === 'number'
+        ? candidate.seconds
+        : typeof candidate._seconds === 'number'
+          ? candidate._seconds
+          : null;
+    return seconds === null ? null : seconds * 1000;
   }
-
   return null;
 }
 
 function recordTime(record: RecordDoc) {
   return (
-    timestampToMillis(record.lastActivityAt) ??
-    timestampToMillis(record.createdAtIso) ??
-    timestampToMillis(record.paymentUpdatedAt) ??
-    timestampToMillis(record.deliveredAt) ??
-    timestampToMillis(record.completedAt) ??
-    timestampToMillis(record.updatedAt) ??
-    timestampToMillis(record.updated_at) ??
-    timestampToMillis(record.updateTime) ??
-    timestampToMillis(record.createdAt) ??
-    timestampToMillis(record.created_at) ??
-    timestampToMillis(record.orderDate) ??
-    timestampToMillis(record.order_date) ??
-    timestampToMillis(record.createTime)
+    millis(record.lastActivityAt) ??
+    millis(record.paymentUpdatedAt) ??
+    millis(record.confirmedAt) ??
+    millis(record.completedAt) ??
+    millis(record.updatedAt) ??
+    millis(record.updated_at) ??
+    millis(record.updateTime) ??
+    millis(record.createdAt) ??
+    millis(record.created_at) ??
+    millis(record.orderDate) ??
+    millis(record.createTime)
   );
 }
 
-function createdTime(record: RecordDoc) {
-  return timestampToMillis(record.createdAt) ?? timestampToMillis(record.created_at) ?? timestampToMillis(record.createTime);
-}
-
-function updatedTime(record: RecordDoc) {
-  return timestampToMillis(record.updatedAt) ?? timestampToMillis(record.updated_at) ?? timestampToMillis(record.updateTime);
-}
-
-function looksUpdated(record: RecordDoc) {
-  const created = createdTime(record);
-  const updated = updatedTime(record);
-  if (!created || !updated) return Boolean(updated);
-  return updated - created > 60_000;
-}
-
-function later(current: number | null, next: number | null) {
-  if (current === null) return next;
-  if (next === null) return current;
-  return next > current ? next : current;
-}
-
-function storeIdFromRecord(record: RecordDoc, collectionId: string) {
-  const direct = fieldText(record, ['storeId', 'store_id', 'merchantId', 'merchant_id', 'businessId', 'business_id', 'workspaceId', 'workspace_id', 'storeSlug', 'sellerId'], '');
+function storeId(record: RecordDoc, moduleId: string) {
+  const direct = field(record, [
+    'storeId',
+    'store_id',
+    'merchantId',
+    'merchant_id',
+    'businessId',
+    'business_id',
+    'workspaceId',
+    'sellerId',
+  ]);
   if (direct) return direct;
-
   const metadata = asRecord(record.metadata);
-  const metadataStore = valueText(metadata?.storeId ?? metadata?.store_id ?? metadata?.merchantId ?? metadata?.merchant_id, '');
-  if (metadataStore) return metadataStore;
-
-  if (collectionId === 'storeProfiles' || collectionId === 'storeSettings') return valueText(record.id, '');
-  return '';
+  const nested = text(metadata?.storeId ?? metadata?.store_id ?? metadata?.merchantId);
+  if (nested) return nested;
+  return moduleId === 'storeProfiles' || moduleId === 'storeSettings' ? text(record.id) : '';
 }
 
-function storeName(record: RecordDoc | null | undefined, fallback: string) {
-  return fieldText(record, ['displayName', 'storeName', 'name', 'businessName', 'merchantName', 'profileName', 'ownerName'], fallback);
+function firstItem(record: RecordDoc) {
+  const items = Array.isArray(record.items) ? record.items : [];
+  return asRecord(items[0]);
 }
 
-function storeContact(record: RecordDoc | null | undefined) {
-  return fieldText(record, ['publicEmail', 'email', 'ownerEmail', 'adminEmail', 'supportEmail', 'contactEmail', 'businessEmail'], 'Not set');
+function itemName(record: RecordDoc) {
+  const item = firstItem(record);
+  return (
+    field(record, ['itemName', 'productName', 'serviceName', 'courseName', 'name', 'title']) ||
+    text(item?.name ?? item?.productName ?? item?.itemName ?? item?.serviceName) ||
+    'Item'
+  );
 }
 
-function storePhone(record: RecordDoc | null | undefined) {
-  return fieldText(record, ['publicPhone', 'phone', 'phoneNumber', 'contactPhone', 'storePhone', 'whatsappNumber', 'businessPhone'], 'Not set');
+function customerName(record: RecordDoc) {
+  const customer = asRecord(record.customer);
+  return field(record, ['customerName', 'buyerName', 'name', 'fullName']) || text(customer?.name) || 'Customer';
 }
 
-function storeLocation(record: RecordDoc | null | undefined) {
-  const address = fieldText(record, ['addressLine1', 'address', 'businessAddress'], '');
-  const city = fieldText(record, ['city', 'storeCity', 'town', 'location'], '');
-  const country = fieldText(record, ['country', 'storeCountry'], '');
-  return [address, city, country].filter(Boolean).join(', ') || 'Not set';
-}
-
-function orderStatus(record: RecordDoc) {
-  return [record.paymentStatus, record.payment_status, record.orderStatus, record.order_status, record.fulfillmentStatus, record.deliveryStatus, record.status]
-    .map((value) => (typeof value === 'string' ? value.trim().toLowerCase() : ''))
+function statusText(record: RecordDoc) {
+  return [
+    record.paymentStatus,
+    record.payment_status,
+    record.bookingStatus,
+    record.booking_status,
+    record.orderStatus,
+    record.order_status,
+    record.fulfillmentStatus,
+    record.deliveryStatus,
+    record.status,
+  ]
+    .map((value) => text(value).toLowerCase())
     .filter(Boolean)
     .join(' ');
 }
 
-function amountFromRecord(record: RecordDoc) {
+function amount(record: RecordDoc) {
   const payment = asRecord(record.payment);
-  const minor = record.amountMinor ?? record.amount_minor ?? payment?.amountMinor ?? payment?.amount_minor;
-  if (typeof minor === 'number' && Number.isFinite(minor) && minor > 0) return minor / 100;
-
+  const minor = record.amountMinor ?? record.amount_minor ?? payment?.amountMinor;
+  if (typeof minor === 'number' && Number.isFinite(minor)) return minor / 100;
   const candidates = [
     payment?.customerTotal,
     payment?.amount,
     record.customerTotal,
     record.finalTotal,
-    record.final_total,
     record.amountPaid,
-    record.amount_paid,
     record.confirmedAmount,
     record.totalAmount,
-    record.total_amount,
     record.grandTotal,
     record.total,
     record.amount,
   ];
-  const value = candidates.find((item) => typeof item === 'number' && Number.isFinite(item));
-  return typeof value === 'number' ? value : 0;
+  const found = candidates.find((value) => typeof value === 'number' && Number.isFinite(value));
+  return typeof found === 'number' ? found : 0;
 }
 
-function shouldCountRevenue(record: RecordDoc) {
-  const status = orderStatus(record);
-  if (!status) return true;
-  if (/failed|cancelled|canceled|declined|abandoned|refunded/.test(status)) return false;
-  return /paid|success|successful|confirmed|delivered|completed|paid_cash/.test(status);
+function paid(record: RecordDoc) {
+  const status = statusText(record);
+  return !/failed|cancelled|canceled|declined|abandoned|refunded/.test(status) &&
+    /paid|success|successful|confirmed|delivered|completed|paid_cash/.test(status);
 }
 
-function formatMoney(value: number) {
+function money(value: number) {
   return `GHS ${value.toLocaleString('en', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
-function formatDate(value: number | null) {
-  if (!value) return 'No activity yet';
-  return new Intl.DateTimeFormat('en', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' }).format(new Date(value));
-}
-
-function ageLabel(value: number | null) {
+function age(value: number | null) {
   if (!value) return 'No activity';
   const minutes = Math.max(0, Math.round((Date.now() - value) / 60000));
   if (minutes < 60) return `${minutes}m ago`;
   const hours = Math.round(minutes / 60);
-  if (hours < 48) return `${hours}h ago`;
-  return `${Math.round(hours / 24)}d ago`;
+  return hours < 48 ? `${hours}h ago` : `${Math.round(hours / 24)}d ago`;
 }
 
-function activityStatus(lastAt: number | null): StoreActivityRow['status'] {
-  if (!lastAt) return 'empty';
-  const days = (Date.now() - lastAt) / 86400000;
-  if (days <= 2) return 'active';
-  if (days <= 14) return 'warm';
-  return 'quiet';
+function date(value: number | null) {
+  if (!value) return 'No activity yet';
+  return new Intl.DateTimeFormat('en', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(new Date(value));
 }
 
-function statusTone(status: StoreActivityRow['status']): 'green' | 'yellow' | 'red' | 'slate' {
+function normalized(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+function orderKind(record: RecordDoc) {
+  const metadata = asRecord(record.metadata);
+  const item = firstItem(record);
+  const combined = [
+    record.recordType,
+    record.orderType,
+    record.itemType,
+    record.sourceLabel,
+    record.sourceChannel,
+    metadata?.quickPayType,
+    metadata?.accountingType,
+    item?.type,
+    item?.itemType,
+  ]
+    .map((value) => text(value).toLowerCase())
+    .join(' ');
+  if (/booking|appointment/.test(combined)) return 'booking';
+  if (/service|course|donation|registration/.test(combined)) return 'service';
+  return 'product';
+}
+
+function eventFor(record: RecordDoc, moduleId: string, moduleLabel: string, ownerId: string): ActivityEvent {
+  const recordId = text(record.id, text(record.path, 'record'));
+  const at = recordTime(record);
+  const status = statusText(record);
+  const total = paid(record) ? amount(record) : 0;
+  const subject = itemName(record);
+  let action = moduleLabel;
+  let description = `${moduleLabel} record changed.`;
+  let tone: ActivityEvent['tone'] = 'slate';
+  let href = `/admin/stores/${encodeURIComponent(ownerId)}`;
+
+  if (moduleId === 'orders') {
+    const kind = orderKind(record);
+    const name = customerName(record);
+    tone = /failed|cancelled|declined/.test(status) ? 'red' : paid(record) ? 'green' : 'blue';
+    if (/failed|cancelled|declined/.test(status)) action = 'Payment or order failed';
+    else if (/delivered|completed/.test(status)) action = kind === 'booking' ? 'Completed booking' : kind === 'service' ? 'Completed service sale' : 'Completed product sale';
+    else if (paid(record)) action = kind === 'booking' ? 'Received booking payment' : kind === 'service' ? 'Received service payment' : 'Completed product sale';
+    else action = kind === 'booking' ? 'Created booking order' : kind === 'service' ? 'Created service order' : 'Created product order';
+    description = `${name} ${paid(record) ? 'paid for' : 'started'} ${subject}${total ? ` · ${money(total)}` : ''}.`;
+    href = '/admin/orders';
+  } else if (moduleId === 'bookings') {
+    tone = /failed|cancelled|declined/.test(status) ? 'red' : /completed|confirmed|paid|success/.test(status) ? 'green' : 'blue';
+    action = /completed/.test(status)
+      ? 'Completed website booking'
+      : /confirmed|paid|success/.test(status)
+        ? 'Confirmed website booking'
+        : /failed|cancelled|declined/.test(status)
+          ? 'Booking payment failed'
+          : 'Created website booking';
+    description = `${customerName(record)} booked ${subject}${total ? ` · ${money(total)}` : ''}.`;
+    href = '/admin/orders';
+  } else if (moduleId === 'customers') {
+    action = 'Saved customer';
+    tone = 'blue';
+    description = `${customerName(record)} was saved to the customer list.`;
+    href = '/admin/customers';
+  } else if (moduleId === 'products' || moduleId === 'publicProducts') {
+    action = 'Updated product or inventory';
+    description = `${subject} changed in the ${moduleId === 'publicProducts' ? 'public catalog' : 'store catalog'}.`;
+    href = '/admin/products';
+  } else if (moduleId === 'publicListings' || moduleId === 'catalogItems') {
+    action = 'Updated marketplace listing';
+    description = `${subject} changed in marketplace records.`;
+    href = '/admin/products';
+  } else if (moduleId === 'services' || moduleId === 'courses') {
+    action = moduleId === 'services' ? 'Updated service' : 'Updated course';
+    description = `${subject} changed in the catalog.`;
+    href = '/admin/products';
+  } else if (moduleId === 'storeProfiles') {
+    action = 'Updated store profile';
+    tone = 'yellow';
+    description = `${field(record, ['displayName', 'storeName', 'name', 'businessName'], ownerId)} profile is available in Sedifex.`;
+  } else if (moduleId === 'storeSettings') {
+    action = 'Updated store settings';
+    tone = 'yellow';
+    description = 'Store settings were changed.';
+  } else if (moduleId === 'webhookDeliveries') {
+    const deliveryStatus = field(record, ['status', 'result', 'deliveryStatus']).toLowerCase();
+    tone = /fail|error|retry/.test(deliveryStatus) ? 'red' : 'green';
+    action = tone === 'red' ? 'Webhook failed or retried' : 'Webhook delivered';
+    description = `${field(record, ['eventType', 'event', 'topic', 'type'], 'Webhook event')} ${deliveryStatus || 'was processed'}.`;
+    href = '/admin/deliveries';
+  } else if (moduleId === 'analyticsEvents') {
+    const eventName = field(record, ['eventName', 'event', 'name', 'type'], 'client_action').toLowerCase();
+    action = eventName.replace(/[_.-]+/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase());
+    description = `Client action recorded${subject !== 'Item' ? ` for ${subject}` : ''}.`;
+    tone = /paid|checkout|cart|whatsapp|phone/.test(eventName) ? 'green' : 'blue';
+    href = '/admin/analytics';
+  }
+
+  return {
+    id: `${moduleId}-${ownerId}-${recordId}`,
+    storeId: ownerId,
+    moduleId,
+    moduleLabel,
+    action,
+    description,
+    recordId,
+    subject,
+    amount: total,
+    at,
+    href,
+    tone,
+  };
+}
+
+function isTransaction(event: ActivityEvent) {
+  return event.moduleId === 'orders' || event.moduleId === 'bookings';
+}
+
+function isCatalogNoise(event: ActivityEvent) {
+  return ['products', 'publicProducts', 'publicListings', 'catalogItems'].includes(event.moduleId);
+}
+
+function refineEvents(events: ActivityEvent[]) {
+  const sorted = [...events].sort((a, b) => (b.at || 0) - (a.at || 0));
+  const kept: ActivityEvent[] = [];
+
+  for (const event of sorted) {
+    if (isCatalogNoise(event)) {
+      const subject = normalized(event.subject);
+      const linkedSale = sorted.find((candidate) => {
+        if (!isTransaction(candidate) || !event.at || !candidate.at) return false;
+        const closeInTime = Math.abs(candidate.at - event.at) <= 3 * 60_000;
+        const sameSubject = subject && normalized(candidate.subject) === subject;
+        return closeInTime && sameSubject;
+      });
+      if (linkedSale) continue;
+
+      const duplicateCatalogWrite = kept.some((candidate) => {
+        if (!isCatalogNoise(candidate) || !event.at || !candidate.at) return false;
+        return normalized(candidate.subject) === subject && Math.abs(candidate.at - event.at) <= 2 * 60_000;
+      });
+      if (duplicateCatalogWrite) continue;
+    }
+    kept.push(event);
+  }
+
+  return kept;
+}
+
+async function safeRead(collection: string) {
+  try {
+    const result = await listFirestoreDocuments(collection, 600);
+    return { ok: true, documents: result.documents as RecordDoc[], error: null as string | null };
+  } catch (error) {
+    return { ok: false, documents: [] as RecordDoc[], error: error instanceof Error ? error.message : `Unable to read ${collection}.` };
+  }
+}
+
+async function loadData() {
+  const env = getFirebaseEnvStatus();
+  if (!env.ready) return { error: 'Firebase environment variables are not ready.', stores: [] as StoreActivityRow[], events: [] as ActivityEvent[] };
+
+  const results = await Promise.all(COLLECTIONS.map((config) => safeRead(config.collection)));
+  const profiles = new Map<string, RecordDoc>();
+  const rawEvents = new Map<string, ActivityEvent[]>();
+  const counts = new Map<string, number>();
+  const revenue = new Map<string, number>();
+
+  COLLECTIONS.forEach((config, index) => {
+    results[index].documents.forEach((record) => {
+      const ownerId = storeId(record, config.id);
+      if (!ownerId) return;
+      if (config.id === 'storeProfiles') profiles.set(ownerId, { ...(profiles.get(ownerId) || {}), ...record, id: ownerId });
+      if (config.id === 'storeSettings') profiles.set(ownerId, { ...record, ...(profiles.get(ownerId) || {}), id: ownerId });
+      const event = eventFor(record, config.id, config.label, ownerId);
+      rawEvents.set(ownerId, [...(rawEvents.get(ownerId) || []), event]);
+      counts.set(ownerId, (counts.get(ownerId) || 0) + 1);
+      if (config.amount) revenue.set(ownerId, (revenue.get(ownerId) || 0) + event.amount);
+    });
+  });
+
+  const ids = new Set([...profiles.keys(), ...rawEvents.keys()]);
+  const stores = [...ids]
+    .map((id) => {
+      const profile = profiles.get(id) || { id };
+      const recentEvents = refineEvents(rawEvents.get(id) || []);
+      const lastAt = recentEvents[0]?.at || recordTime(profile);
+      const days = lastAt ? (Date.now() - lastAt) / 86_400_000 : Infinity;
+      const status: StoreActivityRow['status'] = !lastAt ? 'empty' : days <= 2 ? 'active' : days <= 14 ? 'warm' : 'quiet';
+      return {
+        id,
+        name: field(profile, ['displayName', 'storeName', 'name', 'businessName'], id),
+        contact: field(profile, ['publicEmail', 'email', 'ownerEmail', 'contactEmail'], 'Not set'),
+        phone: field(profile, ['publicPhone', 'phone', 'phoneNumber', 'contactPhone'], 'Not set'),
+        status,
+        lastAt,
+        totalRecords: counts.get(id) || 0,
+        revenue: revenue.get(id) || 0,
+        recentEvents,
+      } satisfies StoreActivityRow;
+    })
+    .sort((a, b) => (b.lastAt || 0) - (a.lastAt || 0));
+
+  return {
+    error: results.find((result) => result.error)?.error || null,
+    stores,
+    events: stores.flatMap((store) => store.recentEvents.map((event) => ({ ...event, description: `${store.name}: ${event.description}` }))).sort((a, b) => (b.at || 0) - (a.at || 0)),
+  };
+}
+
+function badgeTone(status: StoreActivityRow['status']): 'green' | 'yellow' | 'red' | 'slate' {
   if (status === 'active') return 'green';
   if (status === 'warm') return 'yellow';
   if (status === 'quiet') return 'red';
   return 'slate';
 }
 
-function statusLabel(status: StoreActivityRow['status']) {
-  if (status === 'active') return 'Active';
-  if (status === 'warm') return 'Warm';
-  if (status === 'quiet') return 'Quiet';
-  return 'No activity';
-}
-
-function firstItem(record: RecordDoc) {
-  const items = Array.isArray(record.items) ? record.items : [];
-  const item = items[0];
-  return item && typeof item === 'object' && !Array.isArray(item) ? item as Record<string, unknown> : null;
-}
-
-function itemName(record: RecordDoc) {
-  const item = firstItem(record);
-  return fieldText(record, ['itemName', 'productName', 'serviceName', 'courseName', 'name', 'title'], '')
-    || valueText(item?.name ?? item?.productName ?? item?.itemName ?? item?.serviceName ?? item?.courseName, '')
-    || 'Item';
-}
-
-function buyerName(record: RecordDoc) {
-  const customer = asRecord(record.customer);
-  return fieldText(record, ['customerName', 'buyerName', 'name'], '') || valueText(customer?.name, '') || 'Customer';
-}
-
-function readableEventName(value: string) {
-  return value
-    .split(/[_.-]+/)
-    .filter(Boolean)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(' ') || 'Client action';
-}
-
-function compactDetail(label: string, value: string) {
-  return value ? `${label}: ${value}` : '';
-}
-
-function analyticsAction(record: RecordDoc) {
-  const eventName = fieldText(record, ['eventName', 'event', 'name', 'type'], 'client_action').toLowerCase();
-  const product = fieldText(record, ['productName', 'productTitle', 'itemName', 'actionTarget'], '');
-  const store = fieldText(record, ['storeName', 'merchantName', 'businessName'], '');
-  const searchTerm = fieldText(record, ['searchTerm', 'query', 'q'], '');
-  const page = fieldText(record, ['pagePath', 'pageUrl', 'path', 'url'], '');
-  const device = fieldText(record, ['device', 'deviceType'], '');
-  const source = fieldText(record, ['trafficSource', 'source', 'referrer'], '');
-  const session = fieldText(record, ['sessionId', 'visitorId', 'userId'], '');
-  const context = [compactDetail('page', page), compactDetail('device', device), compactDetail('source', source), compactDetail('session', session)].filter(Boolean).join(' · ');
-
-  if (eventName === 'product_view') return { action: 'Viewed product', description: `Client viewed ${product || 'a product'}${store ? ` from ${store}` : ''}.${context ? ` ${context}.` : ''}`, tone: 'blue' as ActivityEvent['tone'] };
-  if (eventName === 'store_view') return { action: 'Viewed store', description: `Client opened ${store || 'the store page'}.${context ? ` ${context}.` : ''}`, tone: 'blue' as ActivityEvent['tone'] };
-  if (eventName === 'page_view') return { action: 'Viewed page', description: `Client visited ${page || 'a page'}${store ? ` for ${store}` : ''}.${context ? ` ${context}.` : ''}`, tone: 'slate' as ActivityEvent['tone'] };
-  if (eventName === 'search') return { action: 'Searched marketplace', description: `Client searched for “${searchTerm || 'unknown term'}”.${context ? ` ${context}.` : ''}`, tone: 'yellow' as ActivityEvent['tone'] };
-  if (eventName === 'add_to_cart') return { action: 'Added to cart', description: `Client added ${product || 'an item'} to cart.${context ? ` ${context}.` : ''}`, tone: 'green' as ActivityEvent['tone'] };
-  if (eventName === 'checkout_started') return { action: 'Started checkout', description: `Client started checkout${product ? ` for ${product}` : ''}.${context ? ` ${context}.` : ''}`, tone: 'green' as ActivityEvent['tone'] };
-  if (eventName === 'payment_initialized') return { action: 'Started payment', description: `Client opened payment${product ? ` for ${product}` : ''}.${context ? ` ${context}.` : ''}`, tone: 'green' as ActivityEvent['tone'] };
-  if (eventName === 'order_paid') return { action: 'Completed payment', description: `Client paid for ${product || 'an order'}.${context ? ` ${context}.` : ''}`, tone: 'green' as ActivityEvent['tone'] };
-  if (eventName === 'whatsapp_click') return { action: 'Clicked WhatsApp', description: `Client tapped WhatsApp${product ? ` about ${product}` : ''}.${context ? ` ${context}.` : ''}`, tone: 'green' as ActivityEvent['tone'] };
-  if (eventName === 'phone_click') return { action: 'Clicked phone number', description: `Client tapped the store phone number.${context ? ` ${context}.` : ''}`, tone: 'green' as ActivityEvent['tone'] };
-  if (eventName === 'seller_profile_click') return { action: 'Opened seller profile', description: `Client opened ${store || 'the seller'} profile.${context ? ` ${context}.` : ''}`, tone: 'blue' as ActivityEvent['tone'] };
-
-  return { action: readableEventName(eventName), description: `Client event recorded${page ? ` on ${page}` : ''}.${context ? ` ${context}.` : ''}`, tone: 'slate' as ActivityEvent['tone'] };
-}
-
-function orderKind(record: RecordDoc) {
-  const item = firstItem(record);
-  const metadata = asRecord(record.metadata);
-  const combined = [
-    record.recordType,
-    record.orderType,
-    record.order_type,
-    record.itemType,
-    record.item_type,
-    record.fulfillmentType,
-    record.sourceLabel,
-    record.sourceChannel,
-    record.source,
-    metadata?.recordType,
-    metadata?.orderType,
-    metadata?.quickPayType,
-    metadata?.accountingType,
-    item?.type,
-    item?.itemType,
-    item?.item_type,
-    item?.serviceName,
-  ].map((value) => valueText(value).toLowerCase()).join(' ');
-
-  if (/booking|appointment/.test(combined)) return 'booking';
-  if (/service|course|student_registration|donation/.test(combined)) return 'service';
-  if (/cash|manual/.test(combined)) return 'manual';
-  return 'product';
-}
-
-function actionHref(moduleId: string, storeId: string, recordId: string) {
-  if (moduleId === 'storeProfiles' || moduleId === 'storeSettings') return `/admin/stores/${encodeURIComponent(storeId)}`;
-  if (moduleId === 'orders' || moduleId === 'bookings') return '/admin/orders';
-  if (moduleId === 'customers') return '/admin/customers';
-  if (moduleId === 'webhookDeliveries') return '/admin/deliveries';
-  if (moduleId === 'analyticsEvents') return '/admin/analytics';
-  if (moduleId === 'publicListings' || moduleId === 'publicProducts' || moduleId === 'products' || moduleId === 'services' || moduleId === 'courses' || moduleId === 'catalogItems') return '/admin/products';
-  return `/admin/stores/${encodeURIComponent(storeId)}?record=${encodeURIComponent(recordId)}`;
-}
-
-function activityForRecord(record: RecordDoc, moduleId: string, moduleLabel: string, storeId: string): ActivityEvent {
-  const recordId = valueText(record.id, valueText(record.path, 'record'));
-  const at = recordTime(record);
-  const amount = shouldCountRevenue(record) ? amountFromRecord(record) : 0;
-  const status = orderStatus(record);
-  let action = moduleLabel;
-  let description = `${moduleLabel} record changed.`;
-  let tone: ActivityEvent['tone'] = 'slate';
-
-  if (moduleId === 'orders') {
-    const kind = orderKind(record);
-    const item = itemName(record);
-    const buyer = buyerName(record);
-    const quickPay = /quick.?pay|sedifex quick pay/.test([record.sourceLabel, record.sourceChannel, record.source].map((value) => valueText(value)).join(' ').toLowerCase());
-    tone = amount > 0 ? 'green' : 'blue';
-    if (/delivered|completed/.test(status)) {
-      action = kind === 'product' ? 'Delivered product order' : kind === 'booking' ? 'Completed booking' : 'Completed service payment';
-    } else if (/paid|success|successful|confirmed|paid_cash/.test(status)) {
-      action = kind === 'product' ? 'Received product order' : kind === 'booking' ? 'Received booking payment' : 'Received service payment';
-    } else if (/failed|cancelled|canceled|declined/.test(status)) {
-      action = 'Order needs attention';
-      tone = 'red';
-    } else {
-      action = kind === 'product' ? 'Created product order' : kind === 'booking' ? 'Created booking order' : 'Created service order';
-    }
-    description = `${buyer} ${quickPay ? 'used Quick Pay for' : 'ordered'} ${item}${amount > 0 ? ` · ${formatMoney(amount)}` : ''}.`;
-  } else if (moduleId === 'bookings') {
-    tone = /completed|delivered/.test(status) ? 'green' : 'blue';
-    action = /completed|delivered/.test(status) ? 'Completed website booking' : /confirmed|paid|success/.test(status) ? 'Confirmed website booking' : 'Created website booking';
-    description = `${buyerName(record)} booked ${itemName(record)}${amount > 0 ? ` · ${formatMoney(amount)}` : ''}.`;
-  } else if (moduleId === 'customers') {
-    tone = 'blue';
-    action = looksUpdated(record) ? 'Updated customer' : 'Added customer';
-    description = `${fieldText(record, ['name', 'customerName', 'fullName', 'displayName'], 'Customer')} was saved to the customer list.`;
-  } else if (moduleId === 'products' || moduleId === 'publicProducts') {
-    tone = 'slate';
-    action = looksUpdated(record) ? 'Updated product' : 'Added product';
-    description = `${itemName(record)} is in the product/catalog records.`;
-  } else if (moduleId === 'services') {
-    tone = 'slate';
-    action = looksUpdated(record) ? 'Updated service' : 'Added service';
-    description = `${itemName(record)} is in the service catalog.`;
-  } else if (moduleId === 'courses') {
-    tone = 'slate';
-    action = looksUpdated(record) ? 'Updated course' : 'Added course';
-    description = `${itemName(record)} is in the course catalog.`;
-  } else if (moduleId === 'publicListings' || moduleId === 'catalogItems') {
-    tone = 'blue';
-    action = looksUpdated(record) ? 'Updated marketplace listing' : 'Published marketplace listing';
-    description = `${itemName(record)} appeared in public catalog records.`;
-  } else if (moduleId === 'storeSettings') {
-    tone = 'yellow';
-    action = 'Updated store settings';
-    const googleShopping = nestedValue(record, ['googleShopping', 'connection', 'connected']) === true ? ' Google Shopping is connected.' : '';
-    const autoSync = nestedValue(record, ['googleShopping', 'catalogSync', 'autoSyncEnabled']) === true ? ' Auto sync is on.' : '';
-    description = `Store settings were changed.${googleShopping}${autoSync}`;
-  } else if (moduleId === 'storeProfiles') {
-    tone = 'yellow';
-    action = looksUpdated(record) ? 'Updated store profile' : 'Created store profile';
-    description = `${storeName(record, storeId)} profile is available in Sedifex.`;
-  } else if (moduleId === 'webhookDeliveries') {
-    const deliveryStatus = fieldText(record, ['status', 'result', 'deliveryStatus'], '').toLowerCase();
-    tone = /fail|error|retry/.test(deliveryStatus) ? 'red' : 'green';
-    action = /fail|error|retry/.test(deliveryStatus) ? 'Webhook failed/retried' : 'Webhook delivered';
-    description = `${fieldText(record, ['eventType', 'event', 'topic', 'type'], 'Webhook event')} ${deliveryStatus || 'was processed'}.`;
-  } else if (moduleId === 'analyticsEvents') {
-    const analytics = analyticsAction(record);
-    action = analytics.action;
-    description = analytics.description;
-    tone = analytics.tone;
-  }
-
-  return {
-    id: `${moduleId}-${storeId}-${recordId}`,
-    storeId,
-    moduleId,
-    moduleLabel,
-    action,
-    description,
-    recordId,
-    amount,
-    at,
-    href: actionHref(moduleId, storeId, recordId),
-    tone,
-  };
-}
-
-function searchableText(row: StoreActivityRow) {
-  return [
-    row.name,
-    row.id,
-    row.contact,
-    row.phone,
-    row.location,
-    row.activeModules.join(' '),
-    row.recentEvents.map((event) => `${event.action} ${event.description}`).join(' '),
-  ].join(' ').toLowerCase();
-}
-
-async function safeRead(collection: string, limit = 500) {
-  try {
-    const result = await listFirestoreDocuments(collection, limit);
-    return { ok: true, error: null, documents: result.documents as RecordDoc[] };
-  } catch (error) {
-    return { ok: false, error: error instanceof Error ? error.message : `Unable to read ${collection}.`, documents: [] as RecordDoc[] };
-  }
-}
-
-function ensureModule(map: Map<string, ModuleStat>, id: string, label: string) {
-  const existing = map.get(id);
-  if (existing) return existing;
-  const created = { id, label, count: 0, amount: 0, lastAt: null };
-  map.set(id, created);
-  return created;
-}
-
-async function loadActivityData(): Promise<ActivityData> {
-  const env = getFirebaseEnvStatus();
-  if (!env.ready) {
-    return { ok: false, error: 'Firebase environment variables are not ready in this deployment.', stores: [], events: [], collectionErrors: {} };
-  }
-
-  const results = await Promise.all(ACTIVITY_COLLECTIONS.map((item) => safeRead(item.collection, 600)));
-  const collectionErrors: Record<string, string> = {};
-  const storeProfiles = new Map<string, RecordDoc>();
-  const storeModules = new Map<string, Map<string, ModuleStat>>();
-  const storeEvents = new Map<string, ActivityEvent[]>();
-
-  ACTIVITY_COLLECTIONS.forEach((collectionConfig, index) => {
-    const result = results[index];
-    if (!result.ok && result.error) collectionErrors[collectionConfig.collection] = result.error;
-
-    result.documents.forEach((record) => {
-      const storeId = storeIdFromRecord(record, collectionConfig.id);
-      if (!storeId) return;
-
-      if (collectionConfig.id === 'storeProfiles') {
-        const existing = storeProfiles.get(storeId);
-        storeProfiles.set(storeId, { ...(existing || {}), ...record, id: storeId });
-      }
-
-      if (collectionConfig.id === 'storeSettings') {
-        const existing = storeProfiles.get(storeId);
-        storeProfiles.set(storeId, { ...record, ...(existing || {}), id: storeId });
-      }
-
-      const modules = storeModules.get(storeId) || new Map<string, ModuleStat>();
-      const module = ensureModule(modules, collectionConfig.id, collectionConfig.label);
-      module.count += 1;
-      module.lastAt = later(module.lastAt, recordTime(record));
-      if (collectionConfig.amount && shouldCountRevenue(record)) {
-        module.amount += amountFromRecord(record);
-      }
-      storeModules.set(storeId, modules);
-
-      const events = storeEvents.get(storeId) || [];
-      events.push(activityForRecord(record, collectionConfig.id, collectionConfig.label, storeId));
-      storeEvents.set(storeId, events);
-    });
-  });
-
-  const allStoreIds = new Set([...storeProfiles.keys(), ...storeModules.keys(), ...storeEvents.keys()]);
-  const stores = [...allStoreIds].map((storeId) => {
-    const profile = storeProfiles.get(storeId) || { id: storeId };
-    const modules = [...(storeModules.get(storeId)?.values() || [])].filter((module) => module.count > 0).sort((a, b) => b.count - a.count);
-    const recentEvents = [...(storeEvents.get(storeId) || [])].sort((a, b) => (b.at || 0) - (a.at || 0));
-    const lastAt = recentEvents.map((event) => event.at).reduce(later, modules.map((module) => module.lastAt).reduce(later, recordTime(profile)));
-    const totalRecords = modules.reduce((sum, module) => sum + module.count, 0);
-    const revenue = modules.reduce((sum, module) => sum + module.amount, 0);
-
-    return {
-      id: storeId,
-      name: storeName(profile, storeId),
-      contact: storeContact(profile),
-      phone: storePhone(profile),
-      location: storeLocation(profile),
-      status: activityStatus(lastAt),
-      lastAt,
-      totalRecords,
-      revenue,
-      modules,
-      activeModules: modules.map((module) => module.label),
-      recentEvents,
-    } satisfies StoreActivityRow;
-  }).sort((a, b) => (b.lastAt || 0) - (a.lastAt || 0));
-
-  const events = stores.flatMap((store) => store.recentEvents.map((event) => ({ ...event, description: `${store.name}: ${event.description}` }))).sort((a, b) => (b.at || 0) - (a.at || 0));
-
-  return {
-    ok: true,
-    error: null,
-    stores,
-    events,
-    collectionErrors,
-  };
-}
-
 export default async function StoreActivityPage({ searchParams }: { searchParams: SearchParams }) {
   const params = await searchParams;
   const query = (params.q || '').trim().toLowerCase();
-  const data = await loadActivityData();
-  const stores = query ? data.stores.filter((store) => searchableText(store).includes(query)) : data.stores;
-  const activeStores = data.stores.filter((store) => store.status === 'active' || store.status === 'warm').length;
-  const totalRecords = data.stores.reduce((sum, store) => sum + store.totalRecords, 0);
+  const data = await loadData();
+  const stores = query
+    ? data.stores.filter((store) => [store.name, store.id, store.contact, store.phone, ...store.recentEvents.map((event) => `${event.action} ${event.description}`)].join(' ').toLowerCase().includes(query))
+    : data.stores;
+  const active = data.stores.filter((store) => store.status === 'active' || store.status === 'warm').length;
   const totalRevenue = data.stores.reduce((sum, store) => sum + store.revenue, 0);
-  const topModules = ACTIVITY_COLLECTIONS.map((config) => {
-    const count = data.stores.reduce((sum, store) => sum + (store.modules.find((module) => module.id === config.id)?.count || 0), 0);
-    return { ...config, count };
-  }).filter((module) => module.count > 0).sort((a, b) => b.count - a.count).slice(0, 8);
+  const totalRecords = data.stores.reduce((sum, store) => sum + store.totalRecords, 0);
 
   return (
     <div className="space-y-6">
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard label="Stores tracked" value={data.ok ? String(data.stores.length) : 'Setup'} delta={data.ok ? `${activeStores} active or warm` : 'Database not ready'} />
-        <StatCard label="Actions found" value={data.ok ? String(data.events.length) : '—'} delta="Exact clicks + records" />
-        <StatCard label="Tracked revenue" value={data.ok ? formatMoney(totalRevenue) : '—'} delta="Paid/readable order records" />
-        <StatCard label="Tracked records" value={data.ok ? String(totalRecords) : '—'} delta="Clicks, orders, catalog, setup" />
+        <StatCard label="Stores tracked" value={String(data.stores.length)} delta={`${active} active or warm`} />
+        <StatCard label="Business actions" value={String(data.events.length)} delta="Sales, bookings, customers and real edits" />
+        <StatCard label="Tracked revenue" value={money(totalRevenue)} delta="Paid order and booking records" />
+        <StatCard label="Raw records" value={String(totalRecords)} delta="Before duplicate and sync-noise cleanup" />
       </section>
 
       {data.error ? (
         <section className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
-          <div className="flex gap-3">
-            <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
-            <div>
-              <p className="font-semibold">Store activity is not available yet.</p>
-              <p className="mt-1 leading-6">{data.error}</p>
-            </div>
-          </div>
+          <div className="flex gap-3"><AlertTriangle className="h-5 w-5" /><p>{data.error}</p></div>
         </section>
       ) : null}
 
       <section className="grid gap-6 xl:grid-cols-[1.8fr_0.8fr]">
-        <SectionCard
-          title="What each client did"
-          action={<Link href="/admin/orders" className="inline-flex items-center gap-1 text-xs font-semibold text-indigo-600 hover:text-indigo-500">Open orders <ArrowUpRight className="h-3.5 w-3.5" /></Link>}
-        >
+        <SectionCard title="What each store actually did" action={<Link href="/admin/orders" className="inline-flex items-center gap-1 text-xs font-semibold text-indigo-600">Open orders <ArrowUpRight className="h-3.5 w-3.5" /></Link>}>
           <form className="mb-4 flex flex-col gap-3 sm:flex-row" action="/admin/store-activity">
             <label className="relative flex-1">
               <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-              <input
-                name="q"
-                defaultValue={params.q || ''}
-                placeholder="Search store, phone, exact action, product, page, session, Quick Pay, WhatsApp"
-                className="w-full rounded-2xl border border-slate-200 bg-white py-3 pl-11 pr-4 text-sm text-slate-900 outline-none transition focus:border-indigo-300 focus:ring-4 focus:ring-indigo-100"
-              />
+              <input name="q" defaultValue={params.q || ''} placeholder="Search store, sale, booking, customer or product" className="w-full rounded-2xl border border-slate-200 bg-white py-3 pl-11 pr-4 text-sm outline-none focus:border-indigo-300 focus:ring-4 focus:ring-indigo-100" />
             </label>
-            <button className="rounded-2xl bg-slate-950 px-5 py-3 text-sm font-bold text-white transition hover:bg-slate-800">Search</button>
+            <button className="rounded-2xl bg-slate-950 px-5 py-3 text-sm font-bold text-white">Search</button>
           </form>
 
-          <div className="overflow-hidden rounded-2xl border border-slate-200">
-            <div className="grid grid-cols-[1.15fr_0.55fr_0.85fr_1.35fr_0.55fr] bg-slate-50 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500 max-xl:hidden">
-              <span>Store</span><span>Status</span><span>Last seen</span><span>Exact recent client actions</span><span>Revenue</span>
-            </div>
-            <div className="divide-y divide-slate-200">
-              {stores.length === 0 ? (
-                <div className="p-8 text-center text-sm text-slate-500">No store activity matches this search.</div>
-              ) : stores.map((store) => (
-                <div key={store.id} className="grid gap-3 px-4 py-4 text-sm transition hover:bg-indigo-50/60 xl:grid-cols-[1.15fr_0.55fr_0.85fr_1.35fr_0.55fr] xl:items-start">
-                  <Link href={`/admin/stores/${encodeURIComponent(store.id)}`} className="flex min-w-0 items-center gap-3">
-                    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-indigo-50 text-indigo-600"><Store className="h-4 w-4" /></span>
-                    <div className="min-w-0">
-                      <p className="truncate font-semibold text-slate-950">{store.name}</p>
-                      <p className="truncate text-xs text-slate-500">{store.contact} · {store.phone}</p>
-                      <p className="truncate text-xs text-slate-400">{store.id}</p>
-                    </div>
-                  </Link>
-                  <div><StatusBadge tone={statusTone(store.status)}>{statusLabel(store.status)}</StatusBadge></div>
-                  <div className="text-slate-600">
-                    <p className="font-medium text-slate-900">{ageLabel(store.lastAt)}</p>
-                    <p className="text-xs text-slate-500">{formatDate(store.lastAt)}</p>
-                    <p className="mt-1 text-xs text-slate-400">{store.totalRecords} records</p>
-                  </div>
-                  <div className="space-y-2">
-                    {store.recentEvents.length === 0 ? <span className="text-xs text-slate-400">No action history yet</span> : null}
-                    {store.recentEvents.slice(0, 4).map((event) => (
-                      <Link key={event.id} href={event.href} className="block rounded-2xl bg-slate-50 p-3 transition hover:bg-slate-100">
-                        <div className="flex items-start justify-between gap-2">
-                          <p className="font-semibold text-slate-900">{event.action}</p>
-                          <StatusBadge tone={event.tone}>{ageLabel(event.at)}</StatusBadge>
-                        </div>
-                        <p className="mt-1 text-xs leading-5 text-slate-600">{event.description}</p>
-                        <p className="mt-1 text-[11px] text-slate-400">{event.moduleLabel} · {event.recordId}</p>
-                      </Link>
-                    ))}
-                    {store.recentEvents.length > 4 ? <p className="text-xs text-slate-500">+{store.recentEvents.length - 4} more actions found — search this store or open Analytics for the full trail</p> : null}
-                  </div>
-                  <div className="font-semibold text-slate-950">{formatMoney(store.revenue)}</div>
+          <div className="divide-y divide-slate-200 overflow-hidden rounded-2xl border border-slate-200">
+            {stores.length === 0 ? <div className="p-8 text-center text-sm text-slate-500">No store activity matches this search.</div> : stores.map((store) => (
+              <div key={store.id} className="grid gap-4 p-4 xl:grid-cols-[1fr_0.5fr_0.7fr_1.6fr_0.55fr]">
+                <Link href={`/admin/stores/${encodeURIComponent(store.id)}`} className="flex min-w-0 gap-3">
+                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-indigo-50 text-indigo-600"><Store className="h-4 w-4" /></span>
+                  <div className="min-w-0"><p className="truncate font-semibold text-slate-950">{store.name}</p><p className="truncate text-xs text-slate-500">{store.contact} · {store.phone}</p><p className="truncate text-xs text-slate-400">{store.id}</p></div>
+                </Link>
+                <div><StatusBadge tone={badgeTone(store.status)}>{store.status === 'empty' ? 'No activity' : store.status}</StatusBadge></div>
+                <div><p className="font-medium text-slate-900">{age(store.lastAt)}</p><p className="text-xs text-slate-500">{date(store.lastAt)}</p><p className="mt-1 text-xs text-slate-400">{store.totalRecords} raw records</p></div>
+                <div className="space-y-2">
+                  {store.recentEvents.slice(0, 5).map((event) => (
+                    <Link key={event.id} href={event.href} className="block rounded-2xl bg-slate-50 p-3 hover:bg-slate-100">
+                      <div className="flex items-start justify-between gap-2"><p className="font-semibold text-slate-900">{event.action}</p><StatusBadge tone={event.tone}>{age(event.at)}</StatusBadge></div>
+                      <p className="mt-1 text-xs leading-5 text-slate-600">{event.description}</p>
+                      <p className="mt-1 text-[11px] text-slate-400">{event.moduleLabel} · {event.recordId}</p>
+                    </Link>
+                  ))}
+                  {store.recentEvents.length > 5 ? <p className="text-xs text-slate-500">+{store.recentEvents.length - 5} more business actions</p> : null}
                 </div>
-              ))}
-            </div>
+                <div className="font-semibold text-slate-950">{money(store.revenue)}</div>
+              </div>
+            ))}
           </div>
         </SectionCard>
 
         <div className="space-y-6">
-          <SectionCard title="Exact latest actions">
+          <SectionCard title="Latest business actions">
             <div className="space-y-3">
-              {data.events.length === 0 ? <p className="text-sm text-slate-500">No action history detected yet.</p> : null}
               {data.events.slice(0, 12).map((event) => (
-                <Link key={event.id} href={event.href} className="block rounded-2xl bg-slate-50 p-4 text-sm transition hover:bg-slate-100">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <p className="font-semibold text-slate-950">{event.action}</p>
-                      <p className="mt-1 text-xs leading-5 text-slate-600">{event.description}</p>
-                    </div>
-                    <StatusBadge tone={event.tone}>{ageLabel(event.at)}</StatusBadge>
-                  </div>
-                  <p className="mt-2 flex items-center gap-1 text-[11px] text-slate-400"><Clock3 className="h-3 w-3" /> {formatDate(event.at)}</p>
+                <Link key={event.id} href={event.href} className="block rounded-2xl bg-slate-50 p-4 text-sm hover:bg-slate-100">
+                  <div className="flex items-start justify-between gap-3"><div><p className="font-semibold text-slate-950">{event.action}</p><p className="mt-1 text-xs leading-5 text-slate-600">{event.description}</p></div><StatusBadge tone={event.tone}>{age(event.at)}</StatusBadge></div>
+                  <p className="mt-2 flex items-center gap-1 text-[11px] text-slate-400"><Clock3 className="h-3 w-3" /> {date(event.at)}</p>
                 </Link>
               ))}
             </div>
           </SectionCard>
 
-          <SectionCard title="Most used modules">
-            <div className="space-y-3">
-              {topModules.length === 0 ? <p className="text-sm text-slate-500">No module activity detected yet.</p> : null}
-              {topModules.map((module) => (
-                <div key={module.id} className="flex items-center justify-between rounded-2xl bg-slate-50 px-4 py-3 text-sm">
-                  <span className="font-medium text-slate-700">{module.label}</span>
-                  <StatusBadge tone="blue">{module.count}</StatusBadge>
-                </div>
-              ))}
-            </div>
-          </SectionCard>
-
-          <SectionCard title="What this page now shows">
-            <div className="grid gap-3 text-sm text-slate-600">
-              <div className="flex gap-3 rounded-2xl bg-slate-50 p-4"><Activity className="h-5 w-5 text-indigo-500" /><span>Client clickstream events from analyticsEvents: page/product/store views, searches, WhatsApp/phone taps, add-to-cart, checkout, and payment starts.</span></div>
-              <div className="flex gap-3 rounded-2xl bg-slate-50 p-4"><Store className="h-5 w-5 text-indigo-500" /><span>Store profile/settings actions, including setup changes.</span></div>
-              <div className="flex gap-3 rounded-2xl bg-slate-50 p-4"><ShoppingBag className="h-5 w-5 text-indigo-500" /><span>Quick Pay, online orders, booking payments, completed orders, and revenue signals.</span></div>
-              <div className="flex gap-3 rounded-2xl bg-slate-50 p-4"><Package className="h-5 w-5 text-indigo-500" /><span>Products, services, courses, public listings, and catalog changes.</span></div>
-              <div className="flex gap-3 rounded-2xl bg-slate-50 p-4"><Users className="h-5 w-5 text-indigo-500" /><span>Customer saves and webhook delivery activity when those collections exist.</span></div>
-            </div>
-          </SectionCard>
-
-          {Object.keys(data.collectionErrors).length > 0 ? (
-            <SectionCard title="Unreadable collections">
-              <div className="space-y-2 text-xs text-amber-700">
-                {Object.entries(data.collectionErrors).map(([collection, error]) => (
-                  <p key={collection} className="rounded-xl bg-amber-50 p-3"><strong>{collection}</strong>: {error}</p>
-                ))}
-              </div>
-            </SectionCard>
-          ) : null}
-
-          <SectionCard title="Next improvement">
-            <div className="flex gap-3 rounded-2xl bg-indigo-50 p-4 text-sm text-indigo-900">
-              <Activity className="h-5 w-5 shrink-0" />
-              <p>This page now shows exact client clickstream when analyticsEvents are available, then fills gaps from business records. For back-office actions like “opened report” or “changed dashboard filter,” add the same event logger inside the store/admin app.</p>
-            </div>
+          <SectionCard title="How activity is classified">
+            <div className="flex gap-3 rounded-2xl bg-indigo-50 p-4 text-sm text-indigo-900"><Activity className="h-5 w-5 shrink-0" /><p>Paid orders and confirmed bookings are shown as sales or booking actions. Product and public-catalog writes at the same time for the same item are treated as inventory sync and hidden, while genuine standalone catalog edits remain visible.</p></div>
           </SectionCard>
         </div>
       </section>
