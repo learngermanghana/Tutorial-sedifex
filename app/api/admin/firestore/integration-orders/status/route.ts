@@ -421,9 +421,24 @@ export async function POST(req: Request) {
     if (action === 'mark_store_paid' && orderData.storePayoutEmailSent !== true) {
       try {
         const emailResult = await sendStorePayoutEmail({ ...orderData, ...patch, id: orderId }, storeData);
-        if (emailResult.sent) emailPatch = { ...emailPatch, ...storePayoutEmailSentPatch(`status_${action}`) };
+        if (!emailResult.sent) {
+          return NextResponse.json({
+            ok: false,
+            error: 'The store payout was not finalized because the payout email could not be queued. Please try “Mark store paid” again.',
+            code: 'store_payout_email_not_queued',
+            retryable: true,
+            emailReason: emailResult.reason,
+          }, { status: 502 });
+        }
+        emailPatch = { ...emailPatch, ...storePayoutEmailSentPatch(`status_${action}`) };
       } catch (emailError) {
         console.error('[integration-order-status] store payout email failed', emailError);
+        return NextResponse.json({
+          ok: false,
+          error: 'The store payout was not finalized because the payout email failed. Please try “Mark store paid” again.',
+          code: 'store_payout_email_failed',
+          retryable: true,
+        }, { status: 502 });
       }
     }
 
