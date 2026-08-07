@@ -2,6 +2,7 @@ import { paymentReferenceValue } from '@/lib/payment-audit';
 
 type EmailOrder = Record<string, unknown>;
 type Recipient = { email: string; name?: string };
+type WebhookResult = { ok?: unknown; error?: unknown };
 
 export type StorePayoutEmailResult =
   | { sent: true; recipientCount: number }
@@ -107,11 +108,24 @@ export async function sendStorePayoutEmail(order: EmailOrder, store: EmailOrder 
       html: `<pre style="font-family:Arial,sans-serif;white-space:pre-wrap">${textBody.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')}</pre>`,
       recipients,
       audience: 'store_payout_paid',
-      source: 'sedifexadmin_store_payout_paid',
+      source: 'sedifexadmin',
       campaignOwner: 'sedifex',
     }),
   });
 
   if (!response.ok) return { sent: false, reason: `email_http_${response.status}` };
+
+  let webhookResult: WebhookResult;
+  try {
+    webhookResult = await response.json() as WebhookResult;
+  } catch {
+    return { sent: false, reason: 'email_invalid_webhook_response' };
+  }
+
+  if (webhookResult.ok !== true) {
+    const webhookError = text(webhookResult.error, 'rejected');
+    return { sent: false, reason: `email_webhook_${webhookError}` };
+  }
+
   return { sent: true, recipientCount: recipients.length };
 }
